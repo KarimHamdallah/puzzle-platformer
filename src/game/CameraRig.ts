@@ -17,16 +17,16 @@ import type { Player } from './Player';
  */
 class CameraTuning {
   screenX = 0.5; // where the target sits on screen (0 = left, 1 = right)
-  screenY = 0.55; // (0 = top, 1 = bottom)
-  deadZoneWidth = 0.1;
-  deadZoneHeight = 0.4; // half of it (216 px) > a full jump (3.2 tiles = 205 px): jumps from rest don't move the camera
+  screenY = 0.5; // (0 = top, 1 = bottom)
+  deadZoneWidth = 0.57;
+  deadZoneHeight = 0.78; // must stay > ~0.4 so a full jump from rest never moves the camera
   softZoneWidth = 0.6;
-  softZoneHeight = 0.75;
+  softZoneHeight = 0.75; // smaller than deadZoneHeight -> treated as equal: no vertical soft zone
   dampingX = 0.25; // s to catch up inside the soft zone (0 = instant)
   dampingY = 0.35;
   targetOffsetX = 0; // tiles from the player's feet to the tracked point
   targetOffsetY = -1;
-  lookAheadTime = 0.3; // s: tracked point is pushed ahead by velocity * this
+  lookAheadTime = 0.5; // s: tracked point is pushed ahead by velocity * this
   lookAheadSmoothing = 0.4; // s: how smoothly the look-ahead changes (turning around)
 }
 
@@ -136,7 +136,7 @@ export class CameraRig {
  * white cross = framing point (screenX/Y), yellow dot = tracked target point.
  */
 class CameraDebug {
-  showGuides = true;
+  showGuides = false;
 
   private readonly tuning: TuningFolder<CameraTuning>;
   private readonly folder: GUI;
