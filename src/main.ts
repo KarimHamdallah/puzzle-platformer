@@ -1,16 +1,14 @@
 import Phaser from 'phaser';
 import './style.css';
-import { debug } from './core/debug/Debug';
-import { GAME_HEIGHT, GAME_WIDTH } from './game/constants';
-import { PlaygroundScene } from './game/scenes/PlaygroundScene';
-import { InputTestScene } from './game/scenes/debug/InputTestScene';
+import { debug } from './core/Debug';
+import { PlaygroundScene } from './game/PlaygroundScene';
 
 // Vector look: render at 1920x1080 with antialiasing, scaled to fit the window.
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
-  width: GAME_WIDTH,
-  height: GAME_HEIGHT,
+  width: 1920,
+  height: 1080,
   backgroundColor: '#4f9d6f',
   pixelArt: false,
   antialias: true,
@@ -26,8 +24,7 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  // The first scene starts automatically. Other scenes can be opened from the debug panel.
-  scene: [PlaygroundScene, InputTestScene],
+  scene: [PlaygroundScene],
 };
 
 const game = new Phaser.Game(config);
