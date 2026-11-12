@@ -11,23 +11,19 @@ export enum Action {
   Count, // number of actions, keep last
 }
 
-interface Binding {
-  code: string; // KeyboardEvent.code = PHYSICAL key, so it still works with an Arabic layout
-  action: Action;
-}
-
-const BINDINGS: Binding[] = [
-  { code: 'ArrowLeft', action: Action.Left },
-  { code: 'KeyA', action: Action.Left },
-  { code: 'ArrowRight', action: Action.Right },
-  { code: 'KeyD', action: Action.Right },
-  { code: 'ArrowDown', action: Action.Down },
-  { code: 'KeyS', action: Action.Down },
-  { code: 'Space', action: Action.Jump },
-  { code: 'KeyZ', action: Action.Jump },
-  { code: 'KeyK', action: Action.Jump },
-  { code: 'KeyR', action: Action.Reset },
-];
+/** Key -> action. Keys are KeyboardEvent.code = PHYSICAL keys, so they still work with an Arabic layout. */
+const KEY_BINDINGS = new Map<string, Action>([
+  ['ArrowLeft', Action.Left],
+  ['KeyA', Action.Left],
+  ['ArrowRight', Action.Right],
+  ['KeyD', Action.Right],
+  ['ArrowDown', Action.Down],
+  ['KeyS', Action.Down],
+  ['Space', Action.Jump],
+  ['KeyZ', Action.Jump],
+  ['KeyK', Action.Jump],
+  ['KeyR', Action.Reset],
+]);
 
 class ActionState {
   held = false; // at least one bound key is down
@@ -45,9 +41,9 @@ class ActionState {
  * event, so a quick tap + another key inside one frame replays the tap as a second press.
  */
 export class InputActions {
-  private readonly states: ActionState[] = [];
-  private readonly keyDown: boolean[] = []; // one entry per BINDINGS row
-  private readonly pressedSinceUpdate: boolean[] = []; // one entry per Action
+  private readonly states: ActionState[] = []; // indexed by Action
+  private readonly pressedSinceUpdate: boolean[] = []; // indexed by Action
+  private readonly keysDown = new Set<string>(); // key codes currently down
   private debugFolder: GUI | null = null;
 
   constructor() {
@@ -55,7 +51,6 @@ export class InputActions {
       this.states.push(new ActionState());
       this.pressedSinceUpdate.push(false);
     }
-    for (let i = 0; i < BINDINGS.length; i++) this.keyDown.push(false);
 
     // Passing `this` as the listener: the browser calls this.handleEvent(event).
     window.addEventListener('keydown', this);
@@ -120,47 +115,44 @@ export class InputActions {
       return;
     }
     const key = e as KeyboardEvent;
-    const i = findBinding(key.code);
-    if (i < 0) return;
+    const action = KEY_BINDINGS.get(key.code);
+    if (action === undefined) return; // not one of our keys
 
     if (key.type === 'keydown') {
       if (isTypingIntoField(key.target)) return; // typing a number into the debug panel
       key.preventDefault(); // Space / arrows must not scroll the page
-      this.onKeyDown(i, key.timeStamp);
+      this.onKeyDown(key.code, action, key.timeStamp);
     } else {
-      this.onKeyUp(i);
+      this.onKeyUp(key.code, action);
     }
   }
 
-  private onKeyDown(binding: number, time: number): void {
-    if (this.keyDown[binding]) return; // OS auto-repeat: the key is already down
-    this.keyDown[binding] = true;
+  private onKeyDown(code: string, action: Action, time: number): void {
+    if (this.keysDown.has(code)) return; // OS auto-repeat: the key is already down
+    this.keysDown.add(code);
 
-    const s = this.states[BINDINGS[binding].action];
+    const s = this.states[action];
     if (s.held) return; // another key of the same action is already down: not a new press
     s.held = true;
     s.pressTime = time; // the real moment of the keypress, not the frame time
     s.consumed = false;
-    this.pressedSinceUpdate[BINDINGS[binding].action] = true;
+    this.pressedSinceUpdate[action] = true;
   }
 
-  private onKeyUp(binding: number): void {
-    if (!this.keyDown[binding]) return;
-    this.keyDown[binding] = false;
-
-    const action = BINDINGS[binding].action;
+  private onKeyUp(code: string, action: Action): void {
+    if (!this.keysDown.delete(code)) return; // wasn't down (e.g. pressed before the page had focus)
     this.states[action].held = this.anyKeyDown(action);
   }
 
   private anyKeyDown(action: Action): boolean {
-    for (let i = 0; i < BINDINGS.length; i++) {
-      if (BINDINGS[i].action === action && this.keyDown[i]) return true;
+    for (const [code, boundAction] of KEY_BINDINGS) {
+      if (boundAction === action && this.keysDown.has(code)) return true;
     }
     return false;
   }
 
   private releaseAll(): void {
-    for (let i = 0; i < BINDINGS.length; i++) this.keyDown[i] = false;
+    this.keysDown.clear();
     for (let a = 0; a < Action.Count; a++) this.states[a].held = false;
   }
 
@@ -172,13 +164,6 @@ export class InputActions {
     folder.add(this, 'moveX').listen().disable();
     this.debugFolder = folder;
   }
-}
-
-function findBinding(code: string): number {
-  for (let i = 0; i < BINDINGS.length; i++) {
-    if (BINDINGS[i].code === code) return i;
-  }
-  return -1;
 }
 
 function isTypingIntoField(target: EventTarget | null): boolean {
