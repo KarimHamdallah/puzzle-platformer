@@ -4,16 +4,30 @@ import { DEBUG_ENABLED, TuningFolder, debug } from '../core/Debug';
 import { TILE } from './constants';
 import type { Player } from './Player';
 
-/** Camera tuning, in TILES and SECONDS. */
+/**
+ * Cinemachine "Framing Transposer" style settings. Zones are FRACTIONS OF THE SCREEN (0..1).
+ *
+ *   +-------------------------------+   red   = hard limit: the target can never go here
+ *   |   +-----------------------+   |   blue  = soft zone: camera catches up with damping
+ *   |   |      +---------+      |   |   clear = dead zone: target moves, camera stays still
+ *   |   |      |    *    |      |   |   *     = screenX / screenY (where the target rests)
+ *   |   |      +---------+      |   |
+ *   |   +-----------------------+   |
+ *   +-------------------------------+
+ */
 class CameraTuning {
-  lookAhead = 3; // tiles ahead of the player at full run speed
-  lookAheadTime = 0.45; // s for the look-ahead to settle (turning around pans smoothly, no snap)
-  followTimeX = 0.1; // s smoothing time constant, horizontal
-  followTimeY = 0.2; // s smoothing time constant, vertical
-  heightOffset = 1.5; // tiles: the camera centre sits this far above the ground you stand on
-  upMargin = 3.5; // tiles a player in the air can rise above the ground line before the camera follows (keep > jumpHeight)
-  downMargin = 0.5; // tiles a player can drop below the ground line before the camera follows
-  fallLookDown = 3; // extra tiles of look-down at max fall speed (only in real falls, not jumps)
+  screenX = 0.5; // where the target sits on screen (0 = left, 1 = right)
+  screenY = 0.55; // (0 = top, 1 = bottom)
+  deadZoneWidth = 0.1;
+  deadZoneHeight = 0.4; // half of it (216 px) > a full jump (3.2 tiles = 205 px): jumps from rest don't move the camera
+  softZoneWidth = 0.6;
+  softZoneHeight = 0.75;
+  dampingX = 0.25; // s to catch up inside the soft zone (0 = instant)
+  dampingY = 0.35;
+  targetOffsetX = 0; // tiles from the player's feet to the tracked point
+  targetOffsetY = -1;
+  lookAheadTime = 0.3; // s: tracked point is pushed ahead by velocity * this
+  lookAheadSmoothing = 0.4; // s: how smoothly the look-ahead changes (turning around)
 }
 
 const T = new CameraTuning();
@@ -24,12 +38,20 @@ function smoothing(dt: number, tau: number): number {
 }
 
 /**
- * Platformer camera.
- *  - Horizontal: follows the player plus a look-ahead in the running direction.
- *  - Vertical: locked to the GROUND LINE (feet height when last grounded), so normal jumps don't
- *    move the screen. In the air it only follows past the up/down margins, and looks down in falls.
- *  - Clamped to the room so smoothing never drifts outside it.
+ * One axis of the dead zone / soft zone follow.
+ * `delta` = tracked point - framing point (px). Returns how far the camera moves this frame.
  */
+function followAxis(delta: number, deadHalf: number, softHalf: number, damping: number, dt: number): number {
+  if (Math.abs(delta) <= deadHalf) return 0; // inside the dead zone: don't move
+
+  const outside = delta - Math.sign(delta) * deadHalf; // the part of delta past the dead zone edge
+  let move = outside * smoothing(dt, damping); // soft zone: close that gap with damping
+
+  const remaining = delta - move; // hard limit: never let the target leave the soft zone
+  if (Math.abs(remaining) > softHalf) move = delta - Math.sign(delta) * softHalf;
+  return move;
+}
+
 export class CameraRig {
   private readonly cam: Phaser.Cameras.Scene2D.Camera;
   private readonly player: Player;
@@ -37,9 +59,9 @@ export class CameraRig {
   private readonly worldH: number;
   private x = 0; // camera centre we steer (world px)
   private y = 0;
-  private lookOffset = 0; // current horizontal look-ahead (px)
-  private groundY = 0; // the ground line the vertical framing is locked to (px)
-  private falling = false; // the player dropped below the down margin: camera is chasing a fall
+  private lookAheadX = 0; // current smoothed look-ahead (px)
+  private targetX = 0; // tracked point this frame (world px)
+  private targetY = 0;
   private debugView: CameraDebug | null = null;
 
   constructor(scene: Phaser.Scene, player: Player, worldW: number, worldH: number) {
@@ -56,51 +78,45 @@ export class CameraRig {
     if (this.debugView) this.debugView.destroy();
   }
 
-  /** Jump straight to the target (level start, respawn). */
+  /** Put the target exactly on the framing point (level start, respawn). */
   snap(): void {
-    this.groundY = this.player.feetY;
-    this.lookOffset = 0;
-    this.falling = false;
-    this.x = this.clampX(this.targetX());
-    this.y = this.clampY(this.targetY());
+    this.lookAheadX = 0;
+    this.updateTarget();
+    this.x = this.clampX(this.targetX - (T.screenX - 0.5) * this.cam.width);
+    this.y = this.clampY(this.targetY - (T.screenY - 0.5) * this.cam.height);
     this.cam.centerOn(this.x, this.y);
   }
 
   /** Call once per frame, after the player's visuals are updated. */
   update(deltaMs: number): void {
     const dt = deltaMs / 1000;
-    const p = this.player;
+    const w = this.cam.width;
+    const h = this.cam.height;
 
-    // Look-ahead eases toward (run speed ratio * lookAhead).
-    this.lookOffset += (p.runRatio * T.lookAhead * TILE - this.lookOffset) * smoothing(dt, T.lookAheadTime);
+    const lookTarget = this.player.body.velocity.x * T.lookAheadTime;
+    this.lookAheadX += (lookTarget - this.lookAheadX) * smoothing(dt, T.lookAheadSmoothing);
+    this.updateTarget();
 
-    // Ground line: snaps to the feet when grounded; in the air it is only dragged past the margins.
-    this.falling = false;
-    if (p.grounded) {
-      this.groundY = p.feetY;
-    } else if (p.feetY < this.groundY - T.upMargin * TILE) {
-      this.groundY = p.feetY + T.upMargin * TILE;
-    } else if (p.feetY > this.groundY + T.downMargin * TILE) {
-      this.groundY = p.feetY - T.downMargin * TILE;
-      this.falling = true;
-    }
+    // Framing point = where the target should appear, expressed in world px.
+    const framingX = this.x + (T.screenX - 0.5) * w;
+    const framingY = this.y + (T.screenY - 0.5) * h;
+    const deadHalfW = (T.deadZoneWidth * w) / 2;
+    const deadHalfH = (T.deadZoneHeight * h) / 2;
+    const softHalfW = (Math.max(T.softZoneWidth, T.deadZoneWidth) * w) / 2;
+    const softHalfH = (Math.max(T.softZoneHeight, T.deadZoneHeight) * h) / 2;
 
-    this.x += (this.targetX() - this.x) * smoothing(dt, T.followTimeX);
-    this.y += (this.targetY() - this.y) * smoothing(dt, T.followTimeY);
+    this.x += followAxis(this.targetX - framingX, deadHalfW, softHalfW, T.dampingX, dt);
+    this.y += followAxis(this.targetY - framingY, deadHalfH, softHalfH, T.dampingY, dt);
     this.x = this.clampX(this.x);
     this.y = this.clampY(this.y);
     this.cam.centerOn(this.x, this.y);
 
-    if (this.debugView) this.debugView.draw(p, this.groundY, this.targetX(), this.targetY(), this.x, this.y);
+    if (this.debugView) this.debugView.draw(this.cam, this.targetX, this.targetY);
   }
 
-  private targetX(): number {
-    return this.player.feetX + this.lookOffset;
-  }
-
-  private targetY(): number {
-    const lookDown = this.falling ? this.player.fallRatio * T.fallLookDown * TILE : 0;
-    return this.groundY - T.heightOffset * TILE + lookDown;
+  private updateTarget(): void {
+    this.targetX = this.player.feetX + T.targetOffsetX * TILE + this.lookAheadX;
+    this.targetY = this.player.feetY + T.targetOffsetY * TILE;
   }
 
   private clampX(x: number): number {
@@ -115,33 +131,37 @@ export class CameraRig {
 }
 
 /**
- * Debug view: "camera tuning" sliders + "camera" folder with guides:
- *  yellow line = ground line, translucent band = up/down margins,
- *  white cross = where the camera wants to be, cyan dot = where it is now.
+ * Debug view: "camera tuning" sliders + Cinemachine-like overlay drawn in SCREEN space:
+ * red = hard limit, blue = soft zone, clear = dead zone, guide lines through the zone edges,
+ * white cross = framing point (screenX/Y), yellow dot = tracked target point.
  */
 class CameraDebug {
-  showGuides = false;
+  showGuides = true;
 
   private readonly tuning: TuningFolder<CameraTuning>;
   private readonly folder: GUI;
-  private readonly guides: Phaser.GameObjects.Graphics;
+  private readonly overlay: Phaser.GameObjects.Graphics;
 
   constructor(scene: Phaser.Scene) {
     const t = new TuningFolder('camera tuning', T);
-    t.add('lookAhead', 0, 8, 0.1);
-    t.add('lookAheadTime', 0, 2, 0.01);
-    t.add('followTimeX', 0, 1, 0.01);
-    t.add('followTimeY', 0, 1, 0.01);
-    t.add('heightOffset', -4, 6, 0.1);
-    t.add('upMargin', 0, 8, 0.1);
-    t.add('downMargin', 0, 8, 0.1);
-    t.add('fallLookDown', 0, 8, 0.1);
+    t.add('screenX', 0, 1, 0.01);
+    t.add('screenY', 0, 1, 0.01);
+    t.add('deadZoneWidth', 0, 1, 0.01);
+    t.add('deadZoneHeight', 0, 1, 0.01);
+    t.add('softZoneWidth', 0, 1, 0.01);
+    t.add('softZoneHeight', 0, 1, 0.01);
+    t.add('dampingX', 0, 2, 0.01);
+    t.add('dampingY', 0, 2, 0.01);
+    t.add('targetOffsetX', -4, 4, 0.1);
+    t.add('targetOffsetY', -4, 4, 0.1);
+    t.add('lookAheadTime', 0, 1, 0.01);
+    t.add('lookAheadSmoothing', 0, 2, 0.01);
     this.tuning = t;
 
     this.folder = debug.gui.addFolder('camera').close();
-    this.folder.add(this, 'showGuides').name('show guides');
+    this.folder.add(this, 'showGuides').name('show dead zone');
 
-    this.guides = scene.add.graphics().setDepth(100);
+    this.overlay = scene.add.graphics().setScrollFactor(0).setDepth(100);
   }
 
   destroy(): void {
@@ -149,24 +169,53 @@ class CameraDebug {
     this.folder.destroy();
   }
 
-  draw(player: Player, groundY: number, targetX: number, targetY: number, camX: number, camY: number): void {
-    const g = this.guides;
+  draw(cam: Phaser.Cameras.Scene2D.Camera, targetX: number, targetY: number): void {
+    const g = this.overlay;
     g.clear();
     if (!this.showGuides) return;
 
-    const left = camX - 1000;
-    const width = 2000;
-    g.fillStyle(0xffffff, 0.08);
-    g.fillRect(left, groundY - T.upMargin * TILE, width, (T.upMargin + T.downMargin) * TILE);
-    g.lineStyle(3, 0xffff66, 0.9);
-    g.lineBetween(left, groundY, left + width, groundY);
+    const w = cam.width;
+    const h = cam.height;
+    const fx = T.screenX * w; // framing point, screen px
+    const fy = T.screenY * h;
+    const softW = Math.max(T.softZoneWidth, T.deadZoneWidth) * w;
+    const softH = Math.max(T.softZoneHeight, T.deadZoneHeight) * h;
+    const deadW = T.deadZoneWidth * w;
+    const deadH = T.deadZoneHeight * h;
+    const sx = fx - softW / 2;
+    const sy = fy - softH / 2;
+    const dx = fx - deadW / 2;
+    const dy = fy - deadH / 2;
 
+    g.fillStyle(0xff3030, 0.18); // hard limit = everything outside the soft zone
+    fillFrame(g, 0, 0, w, h, sx, sy, softW, softH);
+    g.fillStyle(0x3080ff, 0.18); // soft zone = between soft and dead rectangles
+    fillFrame(g, sx, sy, softW, softH, dx, dy, deadW, deadH);
+
+    g.lineStyle(1, 0xffffff, 0.25); // guide lines through the zone edges, across the whole screen
+    g.lineBetween(sx, 0, sx, h);
+    g.lineBetween(sx + softW, 0, sx + softW, h);
+    g.lineBetween(0, sy, w, sy);
+    g.lineBetween(0, sy + softH, w, sy + softH);
     g.lineStyle(2, 0xffffff, 0.6);
-    g.lineBetween(player.feetX, player.feetY - TILE * 0.5, targetX, player.feetY - TILE * 0.5); // look-ahead
-    g.lineStyle(3, 0xffffff, 1);
-    g.lineBetween(targetX - 16, targetY, targetX + 16, targetY);
-    g.lineBetween(targetX, targetY - 16, targetX, targetY + 16);
-    g.fillStyle(0x66ffff, 1);
-    g.fillCircle(camX, camY, 6);
+    g.strokeRect(dx, dy, deadW, deadH);
+
+    g.lineStyle(2, 0xffffff, 0.9); // framing point
+    g.lineBetween(fx - 10, fy, fx + 10, fy);
+    g.lineBetween(fx, fy - 10, fx, fy + 10);
+    g.fillStyle(0xffee33, 1); // tracked target point
+    g.fillCircle(targetX - cam.scrollX, targetY - cam.scrollY, 7);
   }
+}
+
+/** Fill the area of the outer rect that is NOT inside the inner rect (4 bands). */
+function fillFrame(
+  g: Phaser.GameObjects.Graphics,
+  ox: number, oy: number, ow: number, oh: number,
+  ix: number, iy: number, iw: number, ih: number,
+): void {
+  g.fillRect(ox, oy, ow, iy - oy); // top
+  g.fillRect(ox, iy + ih, ow, oy + oh - (iy + ih)); // bottom
+  g.fillRect(ox, iy, ix - ox, ih); // left
+  g.fillRect(ix + iw, iy, ox + ow - (ix + iw), ih); // right
 }

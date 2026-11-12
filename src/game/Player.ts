@@ -121,17 +121,6 @@ export class Player {
     return this.body.bottom;
   }
 
-  /** -1..1: horizontal speed relative to run speed (camera look-ahead). */
-  get runRatio(): number {
-    return this.body.velocity.x / (T.runSpeed * TILE);
-  }
-
-  /** 0..1: fall speed relative to max fall speed (camera look-down). */
-  get fallRatio(): number {
-    if (this.grounded) return 0;
-    return Phaser.Math.Clamp(this.body.velocity.y / (T.maxFallSpeed * TILE), 0, 1);
-  }
-
   respawn(): void {
     this.body.reset(this.spawnX - PLAYER_W / 2, this.spawnY - PLAYER_H);
     this.grounded = false;
