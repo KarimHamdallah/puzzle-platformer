@@ -5,17 +5,16 @@ import type { InputActions } from './InputActions';
 
 /**
  * Debug view for an InputActions instance:
- *  - lil-gui folder "Input": live moveX / moveY, gamepad name, console logging, clear history.
+ *  - lil-gui folder "Input": live moveX / moveY, console logging, clear history.
  *  - overlay table: per-action held / press age / consumed / count / source, plus the last events.
  * Returns a cleanup function (called automatically when the scene shuts down).
  */
 export function attachInputDebug(input: InputActions): () => void {
-  const view = { moveX: 0, moveY: 0, gamepad: 'none', logToConsole: input.logToConsole };
+  const view = { moveX: 0, moveY: 0, logToConsole: input.logToConsole };
 
-  const folder = debug.gui.addFolder('Input');
+  const folder = debug.gui.addFolder('Input').close();
   folder.add(view, 'moveX', -1, 1).listen().disable();
   folder.add(view, 'moveY', -1, 1).listen().disable();
-  folder.add(view, 'gamepad').listen().disable();
   folder
     .add(view, 'logToConsole')
     .name('log events to console')
@@ -27,7 +26,6 @@ export function attachInputDebug(input: InputActions): () => void {
   const sync = (): void => {
     view.moveX = input.moveX;
     view.moveY = input.moveY;
-    view.gamepad = input.gamepadId ?? 'none';
   };
   input.scene.events.on(Phaser.Scenes.Events.POST_UPDATE, sync);
 
@@ -43,7 +41,7 @@ export function attachInputDebug(input: InputActions): () => void {
 function formatInput(input: InputActions): string {
   const now = performance.now();
   const lines: string[] = [
-    `moveX ${signed(input.moveX)}   moveY ${signed(input.moveY)}   pad: ${input.gamepadId ?? 'none'}`,
+    `moveX ${signed(input.moveX)}   moveY ${signed(input.moveY)}`,
     '',
     'action     held   age ms   presses  source',
   ];

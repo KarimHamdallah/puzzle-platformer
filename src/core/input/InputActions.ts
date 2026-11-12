@@ -1,17 +1,10 @@
 import Phaser from 'phaser';
 import { DEBUG_ENABLED } from '../debug/Debug';
-import { createTuning } from '../tuning/Tuning';
 import { ACTIONS, DEFAULT_BINDINGS, type Action, type Bindings } from './Actions';
 import { attachInputDebug } from './InputDebug';
 
-export const INPUT_TUNING = createTuning(
-  'input',
-  { stickDeadzone: 0.3, analogMove: false },
-  { stickDeadzone: { min: 0, max: 0.9, step: 0.05 } },
-);
-
 export interface ActionState {
-  /** At least one bound key/button is down right now. */
+  /** At least one bound key is down right now. */
   held: boolean;
   /** Went down since the previous frame (true even for a tap shorter than one frame). */
   pressed: boolean;
@@ -37,37 +30,31 @@ export interface InputEvent {
 const HISTORY_SIZE = 12;
 
 /**
- * Action-based input for one scene, updated automatically before the scene's update().
+ * Keyboard action input for one scene, updated automatically before the scene's update().
  *
  * Key ideas:
- *  - Several sources (keys, pad buttons, stick) can drive one action; it is "held" while any of them is.
+ *  - Several keys can drive one action; it is "held" while any of them is down.
  *  - Presses are timestamped with the real event time, so buffers are accurate even at low FPS
  *    and taps shorter than one frame are never lost.
- *  - Keyboard comes straight from DOM keydown/keyup, NOT Phaser Key objects: Phaser 3.90 re-processes
- *    its whole per-frame key queue on every DOM event, so a tap + another key in the same frame
- *    replays the tap as a phantom second press (a buffered jump could fire twice).
  *  - `consumeBuffered(action, ms)` = "was it pressed in the last N ms and not used yet?" -> jump buffer.
+ *  - Reads DOM keydown/keyup directly, NOT Phaser Key objects: Phaser 3.90 re-processes its whole
+ *    per-frame key queue on every DOM event, so a tap + another key in the same frame replays the
+ *    tap as a phantom second press (a buffered jump could fire twice).
  */
 export class InputActions {
   readonly scene: Phaser.Scene;
   logToConsole = false;
 
-  private readonly bindings: Bindings;
   private readonly states = {} as Record<Action, ActionState>;
   private readonly sources = {} as Record<Action, Set<string>>;
   private readonly pendingPress = new Set<Action>();
   private readonly pendingRelease = new Set<Action>();
   private readonly history: InputEvent[] = [];
   private readonly codeToActions = new Map<string, Action[]>();
-  private padSources = new Set<string>();
-  private padId: string | null = null;
-  private stickX = 0;
-  private stickY = 0;
   private detachDebug: (() => void) | null = null;
 
   constructor(scene: Phaser.Scene, bindings: Bindings = DEFAULT_BINDINGS) {
     this.scene = scene;
-    this.bindings = bindings;
 
     for (const action of ACTIONS) {
       this.states[action] = {
@@ -81,18 +68,15 @@ export class InputActions {
         lastSource: '-',
       };
       this.sources[action] = new Set();
-    }
-
-    for (const action of ACTIONS) {
-      for (const code of bindings.keys[action]) {
+      for (const code of bindings[action]) {
         const list = this.codeToActions.get(code) ?? [];
         list.push(action);
         this.codeToActions.set(code, list);
       }
     }
+
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
-
     scene.events.on(Phaser.Scenes.Events.PRE_UPDATE, this.update, this);
     scene.game.events.on(Phaser.Core.Events.BLUR, this.releaseAll, this);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, this.destroy, this);
@@ -143,14 +127,12 @@ export class InputActions {
     return true;
   }
 
-  /** -1..1. Analog stick if enabled and pushed, else digital. Both left+right held -> the newest press wins. */
+  /** -1, 0 or 1. Both left+right held -> the newest press wins. */
   get moveX(): number {
-    if (INPUT_TUNING.analogMove && this.stickX !== 0) return this.stickX;
     return this.axis('left', 'right');
   }
 
   get moveY(): number {
-    if (INPUT_TUNING.analogMove && this.stickY !== 0) return this.stickY;
     return this.axis('up', 'down');
   }
 
@@ -160,10 +142,6 @@ export class InputActions {
 
   get events(): readonly InputEvent[] {
     return this.history;
-  }
-
-  get gamepadId(): string | null {
-    return this.padId;
   }
 
   clearHistory(): void {
@@ -196,7 +174,6 @@ export class InputActions {
   }
 
   private update(): void {
-    this.pollGamepad();
     for (const action of ACTIONS) {
       const s = this.states[action];
       s.pressed = this.pendingPress.has(action);
@@ -211,7 +188,7 @@ export class InputActions {
     const set = this.sources[action];
     const wasHeld = set.size > 0;
     set.add(source);
-    if (wasHeld) return; // another binding already holds this action - not a new press
+    if (wasHeld) return; // another key already holds this action - not a new press
 
     const s = this.states[action];
     s.pressTime = time;
@@ -231,54 +208,12 @@ export class InputActions {
     this.record(action, 'up', source, time);
   }
 
-  private pollGamepad(): void {
-    const pad = this.scene.input.gamepad?.pad1;
-    this.padId = pad ? pad.id : null;
-    const now = performance.now();
-    const current = new Set<string>();
-
-    if (pad) {
-      for (const action of ACTIONS) {
-        for (const index of this.bindings.pad[action]) {
-          if (pad.buttons[index]?.pressed) current.add(`${action}|pad:${index}`);
-        }
-      }
-      const dz = INPUT_TUNING.stickDeadzone;
-      const x = pad.leftStick.x;
-      const y = pad.leftStick.y;
-      if (x < -dz) current.add('left|stick');
-      if (x > dz) current.add('right|stick');
-      if (y < -dz) current.add('up|stick');
-      if (y > dz) current.add('down|stick');
-      this.stickX = rescale(x, dz);
-      this.stickY = rescale(y, dz);
-    } else {
-      this.stickX = 0;
-      this.stickY = 0;
-    }
-
-    for (const id of current) {
-      if (!this.padSources.has(id)) {
-        const [action, source] = id.split('|') as [Action, string];
-        this.sourceDown(action, source, now);
-      }
-    }
-    for (const id of this.padSources) {
-      if (!current.has(id)) {
-        const [action, source] = id.split('|') as [Action, string];
-        this.sourceUp(action, source, now);
-      }
-    }
-    this.padSources = current;
-  }
-
   /** Window lost focus: key-up events will never arrive, so release everything. */
   private releaseAll(): void {
     const now = performance.now();
     for (const action of ACTIONS) {
       for (const source of [...this.sources[action]]) this.sourceUp(action, source, now);
     }
-    this.padSources.clear();
   }
 
   private record(action: Action, kind: 'down' | 'up', source: string, time: number): void {
@@ -289,10 +224,10 @@ export class InputActions {
   }
 
   private destroy(): void {
-    this.scene.events.off(Phaser.Scenes.Events.PRE_UPDATE, this.update, this);
-    this.scene.game.events.off(Phaser.Core.Events.BLUR, this.releaseAll, this);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    this.scene.events.off(Phaser.Scenes.Events.PRE_UPDATE, this.update, this);
+    this.scene.game.events.off(Phaser.Core.Events.BLUR, this.releaseAll, this);
     this.detachDebug?.();
     this.detachDebug = null;
   }
@@ -301,10 +236,4 @@ export class InputActions {
 /** Don't steal keys while the user types into a lil-gui number field. */
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-}
-
-function rescale(value: number, deadzone: number): number {
-  const magnitude = Math.abs(value);
-  if (magnitude <= deadzone) return 0;
-  return (Math.sign(value) * (magnitude - deadzone)) / (1 - deadzone);
 }

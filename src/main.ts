@@ -1,37 +1,33 @@
 import Phaser from 'phaser';
 import './style.css';
 import { debug } from './core/debug/Debug';
-import { BootScene } from './game/scenes/BootScene';
+import { GAME_HEIGHT, GAME_WIDTH } from './game/constants';
+import { PlaygroundScene } from './game/scenes/PlaygroundScene';
 import { InputTestScene } from './game/scenes/debug/InputTestScene';
 
-// Internal resolution: 480x270 (16:9). Scales x4 to 1920x1080 with crisp pixels.
-export const GAME_WIDTH = 480;
-export const GAME_HEIGHT = 270;
-
+// Vector look: render at 1920x1080 with antialiasing, scaled to fit the window.
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
-  backgroundColor: '#1a1a2e',
+  backgroundColor: '#4f9d6f',
   pixelArt: false,
-  roundPixels: true,
+  antialias: true,
+  roundPixels: false, // sub-pixel positions = smooth motion for vector shapes
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  input: {
-    gamepad: true,
-  },
   physics: {
     default: 'arcade',
     arcade: {
-      gravity: { x: 0, y: 0 }, // gravity is applied per-body by the player controller (Day 1)
+      gravity: { x: 0, y: 0 }, // the player controller applies its own gravity
       debug: false,
     },
   },
-  // The first scene starts automatically. InputTest is the Day 1 Step 1 test bed.
-  scene: [InputTestScene, BootScene],
+  // The first scene starts automatically. Other scenes can be opened from the debug panel.
+  scene: [PlaygroundScene, InputTestScene],
 };
 
 const game = new Phaser.Game(config);

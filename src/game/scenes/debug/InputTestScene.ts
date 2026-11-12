@@ -24,6 +24,7 @@ const TEXT_STYLE: Phaser.Types.GameObjects.Text.TextStyle = {
   fontFamily: 'monospace',
   fontSize: '9px',
   color: '#e0e0ff',
+  resolution: 4, // crisp text under the 4x camera zoom
 };
 
 /**
@@ -50,7 +51,11 @@ export class InputTestScene extends Phaser.Scene {
     this.lamps.clear();
     this.velocityY = 0;
     this.actions = new InputActions(this);
-    const { width, height } = this.scale;
+    // This scene was laid out for 480x270: zoom the camera to fill the 1920x1080 canvas.
+    const width = 480;
+    const height = 270;
+    this.cameras.main.setZoom(this.scale.width / width).centerOn(width / 2, height / 2);
+    this.cameras.main.setBackgroundColor(0x1a1a2e);
     const cx = width / 2;
 
     this.add.text(cx, 14, 'INPUT TEST', { ...TEXT_STYLE, fontSize: '11px' }).setOrigin(0.5);
@@ -104,8 +109,7 @@ export class InputTestScene extends Phaser.Scene {
 
     this.moveBar.setScale(input.moveX, 1);
 
-    const { width } = this.scale;
-    this.box.x = Phaser.Math.Clamp(this.box.x + input.moveX * TEST.moveSpeed * dt, 30, width - 30);
+    this.box.x = Phaser.Math.Clamp(this.box.x + input.moveX * TEST.moveSpeed * dt, 30, 450);
     this.velocityY += TEST.gravity * dt;
     this.box.y += this.velocityY * dt;
     if (this.box.y >= GROUND_Y) {

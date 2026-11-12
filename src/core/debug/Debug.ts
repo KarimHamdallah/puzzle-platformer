@@ -20,7 +20,7 @@ const OVERLAY_HZ = 15;
  */
 class DebugTools {
   readonly gui: GUI;
-  readonly settings = { overlay: true, lagMs: 0 };
+  readonly settings = { overlay: false, lagMs: 0 };
 
   private readonly stats = { fps: 0, frame: 0 };
   private readonly overlayEl: HTMLPreElement;
@@ -32,7 +32,7 @@ class DebugTools {
   constructor() {
     this.gui = new GUI({ title: 'Debug   ( ` toggles )' });
 
-    const general = this.gui.addFolder('General');
+    const general = this.gui.addFolder('General').close();
     general.add(this.stats, 'fps').listen().disable();
     general.add(this.stats, 'frame').listen().disable();
     general.add(this.settings, 'overlay').name('text overlay').onChange(() => this.applyVisibility());
@@ -71,6 +71,26 @@ class DebugTools {
     if (DEBUG_ENABLED) (window as unknown as { __game: Phaser.Game }).__game = game;
     game.events.on(Phaser.Core.Events.PRE_STEP, this.onPreStep, this);
     game.events.on(Phaser.Core.Events.POST_RENDER, this.onPostRender, this);
+    game.events.once(Phaser.Core.Events.READY, () => this.addSceneSwitcher(game));
+  }
+
+  /** "Scenes" folder: one button per registered scene; stops the running scenes and starts that one. */
+  private addSceneSwitcher(game: Phaser.Game): void {
+    const folder = this.gui.addFolder('Scenes').close();
+    for (const scene of game.scene.getScenes(false)) {
+      const key = scene.sys.settings.key;
+      folder
+        .add(
+          {
+            open: () => {
+              for (const running of game.scene.getScenes(true)) running.scene.stop();
+              game.scene.start(key);
+            },
+          },
+          'open',
+        )
+        .name(key);
+    }
   }
 
   /** Add a text block to the overlay. Returns a function that removes it. */
