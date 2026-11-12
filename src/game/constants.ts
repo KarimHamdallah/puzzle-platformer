@@ -1,11 +1,5 @@
-/** One tile in pixels. All gameplay tuning is in tiles, so changing this rescales the game. */
+/** One tile in world pixels. All gameplay tuning is in tiles, so changing this rescales the game. */
 export const TILE = 64;
 
-/** Greybox palette: green room, red solids, white player. */
-export const COLORS = {
-  background: 0x4f9d6f,
-  solid: 0xff4646,
-  player: 0xffffff,
-  playerEyes: 0x9e9e9e,
-  ghost: 0x000000,
-};
+/** Every pixel-art asset is drawn at 2x: 32 px tiles -> 64 px, 96 px character frames -> 192 px. */
+export const ART_SCALE = 2;

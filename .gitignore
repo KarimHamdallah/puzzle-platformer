@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Third-party CraftPix art: licence forbids publishing the raw files (decide repo visibility first)
+public/assets/craftpix/

@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import type GUI from 'lil-gui';
 import { DEBUG_ENABLED, TuningFolder, debug } from '../core/Debug';
 import { Action, type InputActions } from '../core/InputActions';
-import { COLORS, TILE } from './constants';
+import { ART_SCALE, TILE } from './constants';
 
 /**
  * Every movement number, in TILES and SECONDS (never pixels).
@@ -38,8 +38,11 @@ class PlayerTuning {
 
 const T = new PlayerTuning();
 
-const PLAYER_W = Math.round(TILE * 0.75);
-const PLAYER_H = Math.round(TILE * 0.875);
+// Hitbox: the survivor art is 64 px tall at 2x = 128 px (2 tiles); the hitbox is a bit smaller than
+// the drawing (hair and backpack stick out), so contacts feel fair.
+const PLAYER_W = Math.round(TILE * 0.55);
+const PLAYER_H = Math.round(TILE * 1.8);
+const LAND_ANIM_TIME = 0.12; // s the landing pose is held
 const OVERLAP_INSET = 0.5; // px: the static tree counts touching edges as overlap, so test a slightly smaller box
 
 enum PlayerState {
@@ -77,8 +80,9 @@ export class Player {
   private readonly input: InputActions;
   private readonly spawnX: number;
   private readonly spawnY: number;
-  private readonly ghost: Phaser.GameObjects.Rectangle;
-  private readonly eyes: Phaser.GameObjects.Container;
+  private readonly sprite: Phaser.GameObjects.Sprite;
+  private readonly ghost: Phaser.GameObjects.Image;
+  private landTimer = 0;
   private simTime = 0; // seconds of physics time (stops in slow motion, unlike real time)
   private lastGroundedAt = -Infinity;
   private airborneVy = 0; // last vertical speed in the air = landing impact
@@ -95,16 +99,14 @@ export class Player {
     this.body = scene.physics.add.body(spawnFeetX - PLAYER_W / 2, spawnFeetY - PLAYER_H, PLAYER_W, PLAYER_H);
     this.body.setAllowGravity(false);
 
-    // Takeoff ghost: same size, dark and translucent, left where the last jump started.
-    this.ghost = scene.add.rectangle(0, 0, PLAYER_W, PLAYER_H, COLORS.ghost).setOrigin(0.5, 1).setVisible(false);
+    // Takeoff ghost: a black silhouette of the exact takeoff frame, left where the last jump started.
+    this.ghost = scene.add.image(0, 0, 'player_idle', 0).setOrigin(0.5, 1).setScale(ART_SCALE);
+    this.ghost.setTintFill(0x000000).setVisible(false).setDepth(9);
 
-    // Primitive character: white block + two grey eyes.
-    const block = scene.add.rectangle(0, 0, PLAYER_W, PLAYER_H, COLORS.player).setOrigin(0.5, 1);
-    this.eyes = scene.add.container(0, 0, [
-      scene.add.rectangle(-6, -PLAYER_H * 0.78, 6, 14, COLORS.playerEyes).setOrigin(0.5, 0),
-      scene.add.rectangle(6, -PLAYER_H * 0.78, 6, 14, COLORS.playerEyes).setOrigin(0.5, 0),
-    ]);
-    this.view = scene.add.container(spawnFeetX, spawnFeetY, [block, this.eyes]);
+    // The survivor sprite sits inside a container at the feet (squash & stretch pivots there).
+    this.sprite = scene.add.sprite(0, 0, 'player_idle', 0).setOrigin(0.5, 1).setScale(ART_SCALE);
+    this.sprite.play('player_idle');
+    this.view = scene.add.container(spawnFeetX, spawnFeetY, [this.sprite]).setDepth(10);
 
     if (DEBUG_ENABLED) this.debugView = new PlayerDebug(scene, this);
   }
@@ -198,13 +200,22 @@ export class Player {
   /** Visuals. Called by the scene once per rendered frame. */
   update(deltaMs: number): void {
     this.view.setPosition(this.feetX, this.feetY);
+    this.sprite.setFlipX(this.facing < 0);
+    this.landTimer = Math.max(0, this.landTimer - deltaMs / 1000);
 
-    // Eyes drift toward the facing side and look up / down with vertical speed.
-    const targetX = this.facing * PLAYER_W * 0.16;
-    const targetY = Phaser.Math.Clamp(this.body.velocity.y / jumpSpeed(), -1, 1) * 5;
-    const k = 1 - Math.exp(-deltaMs / 50); // frame-rate independent smoothing
-    this.eyes.x += (targetX - this.eyes.x) * k;
-    this.eyes.y += (targetY - this.eyes.y) * k;
+    // Pick the animation from the physics state.
+    const speed = Math.abs(this.body.velocity.x);
+    const runSpeed = T.runSpeed * TILE;
+    let anim = 'player_idle';
+    if (this.landTimer > 0) anim = 'player_land';
+    else if (!this.grounded) anim = this.body.velocity.y < 0 ? 'player_jump' : 'player_fall';
+    else if (speed > runSpeed * 0.6) anim = 'player_run';
+    else if (speed > 10) anim = 'player_walk';
+    this.sprite.play(anim, true); // true = keep playing if it is already the current animation
+
+    // Leg speed follows ground speed, so feet don't slide while accelerating.
+    if (anim === 'player_run' || anim === 'player_walk') this.sprite.anims.timeScale = Math.max(0.5, speed / runSpeed);
+    else this.sprite.anims.timeScale = 1;
   }
 
   /** Would the body overlap a solid if its top-left were at (x, y)? */
@@ -268,7 +279,8 @@ export class Player {
     this.grounded = false;
     this.lastGroundedAt = -Infinity; // no second coyote jump
 
-    // The ghost marks the takeoff frame and moves on every new jump.
+    // The ghost copies the takeoff frame and moves on every new jump.
+    this.ghost.setTexture(this.sprite.texture.key, this.sprite.frame.name).setFlipX(this.sprite.flipX);
     this.ghost.setPosition(this.feetX, this.feetY).setVisible(T.ghostAlpha > 0).setAlpha(0);
     this.scene.tweens.killTweensOf(this.ghost);
     this.scene.tweens.add({ targets: this.ghost, alpha: T.ghostAlpha, duration: 90 });
@@ -280,6 +292,7 @@ export class Player {
   private land(): void {
     const impact = Phaser.Math.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
     this.pulseScale(1 + T.squash * impact, 1 - T.squash * impact, 130);
+    if (impact > 0.2) this.landTimer = LAND_ANIM_TIME; // small hops don't need the crouch pose
     if (this.debugView) this.debugView.onLand();
   }
 
