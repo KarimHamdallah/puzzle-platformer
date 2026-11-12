@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { Action, InputActions } from '../core/InputActions';
+import { CameraRig } from './CameraRig';
 import { COLORS, TILE } from './constants';
 import { Player } from './Player';
 
@@ -27,6 +28,9 @@ const SOLIDS: Solid[] = [
   { x: 1, y: 21, w: 20, h: 3 }, // floor A
   { x: 21, y: 23, w: 6, h: 1 }, // pit bottom (2 deep): walk off the edge to test coyote time
   { x: 27, y: 21, w: 14, h: 3 }, // floor B
+  // ceiling with a 1-tile hole above floor B: corner correction makes it jumpable without pixel precision
+  { x: 27, y: 18, w: 3, h: 1 },
+  { x: 31, y: 18, w: 2, h: 1 },
   { x: 41, y: 19, w: 18, h: 5 }, // floor C: 2-tile step up
   // left staircase: the first step is low enough to bump your head on
   { x: 5, y: 18, w: 4, h: 1 },
@@ -49,12 +53,13 @@ const SOLIDS: Solid[] = [
 /**
  * Movement test room. Frame order (like a C++ main loop):
  *   1. physics steps at 60 Hz -> fixedUpdate(dt) -> player.fixedUpdate(dt)   (gameplay)
- *   2. update()               -> controls.update(), player.update()          (once per rendered frame)
+ *   2. update()               -> controls, player visuals, camera               (once per rendered frame)
  *   3. render
  */
 export class PlaygroundScene extends Phaser.Scene {
   private controls!: InputActions;
   private player!: Player;
+  private cameraRig!: CameraRig;
   private world!: Phaser.Physics.Arcade.World;
 
   constructor() {
@@ -78,8 +83,7 @@ export class PlaygroundScene extends Phaser.Scene {
     this.player = new Player(this, this.controls, SPAWN_X * TILE, SPAWN_Y * TILE);
     this.physics.add.collider(this.player.body, solids);
 
-    this.cameras.main.setBounds(0, 0, worldW, worldH);
-    this.cameras.main.startFollow(this.player.view, false, 0.12, 0.12, 0, 0);
+    this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
 
     // Arcade fires WORLD_STEP after each physics step's collisions are resolved.
     this.world.on(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
@@ -88,8 +92,12 @@ export class PlaygroundScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     this.controls.update();
-    if (this.controls.pressed(Action.Reset)) this.player.respawn();
+    if (this.controls.pressed(Action.Reset)) {
+      this.player.respawn();
+      this.cameraRig.snap();
+    }
     this.player.update(deltaMs);
+    this.cameraRig.update(deltaMs);
   }
 
   private fixedUpdate(dt: number): void {
@@ -99,6 +107,7 @@ export class PlaygroundScene extends Phaser.Scene {
   /** Our "destructor". Uses this.world: scene.physics.world is already null when SHUTDOWN fires. */
   private shutdown(): void {
     this.world.off(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
+    this.cameraRig.destroy();
     this.player.destroy();
     this.controls.destroy();
   }

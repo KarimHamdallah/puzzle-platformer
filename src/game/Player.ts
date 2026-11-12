@@ -29,6 +29,8 @@ class PlayerTuning {
   // forgiveness
   coyoteMs = 100; // can still jump this long after walking off a ledge
   jumpBufferMs = 120; // a jump pressed this long before landing still happens
+  cornerCorrection = 0.3; // tiles: head would clip a ceiling corner by up to this -> slide past it
+  ledgeCorrection = 0.2; // tiles: feet miss a ledge top by up to this while moving into it -> pop up
   // presentation
   squash = 0.22; // squash & stretch strength (0 = off)
   ghostAlpha = 0.22; // takeoff shadow opacity (0 = off)
@@ -38,6 +40,7 @@ const T = new PlayerTuning();
 
 const PLAYER_W = Math.round(TILE * 0.75);
 const PLAYER_H = Math.round(TILE * 0.875);
+const OVERLAP_INSET = 0.5; // px: the static tree counts touching edges as overlap, so test a slightly smaller box
 
 enum PlayerState {
   Idle,
@@ -70,6 +73,7 @@ export class Player {
   facing = 1;
 
   private readonly scene: Phaser.Scene;
+  private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
   private readonly input: InputActions;
   private readonly spawnX: number;
   private readonly spawnY: number;
@@ -82,6 +86,7 @@ export class Player {
 
   constructor(scene: Phaser.Scene, input: InputActions, spawnFeetX: number, spawnFeetY: number) {
     this.scene = scene;
+    this.physics = scene.physics;
     this.input = input;
     this.spawnX = spawnFeetX;
     this.spawnY = spawnFeetY;
@@ -114,6 +119,17 @@ export class Player {
 
   get feetY(): number {
     return this.body.bottom;
+  }
+
+  /** -1..1: horizontal speed relative to run speed (camera look-ahead). */
+  get runRatio(): number {
+    return this.body.velocity.x / (T.runSpeed * TILE);
+  }
+
+  /** 0..1: fall speed relative to max fall speed (camera look-down). */
+  get fallRatio(): number {
+    if (this.grounded) return 0;
+    return Phaser.Math.Clamp(this.body.velocity.y / (T.maxFallSpeed * TILE), 0, 1);
   }
 
   respawn(): void {
@@ -177,6 +193,11 @@ export class Player {
 
     vy += g * mult * dt;
     vy = Math.min(vy, (fastFalling ? T.fastFallSpeed : T.maxFallSpeed) * TILE);
+
+    // Forgiveness: look one step ahead and fix "missed by a few pixels" before Arcade collides.
+    if (vy < 0) this.correctCorner(vy * dt);
+    else if (!onGround && vx !== 0) this.correctLedge(vx * dt);
+
     b.setVelocity(vx, vy);
 
     if (this.grounded) this.state = Math.abs(vx) > 1 ? PlayerState.Run : PlayerState.Idle;
@@ -195,6 +216,62 @@ export class Player {
     const k = 1 - Math.exp(-deltaMs / 50); // frame-rate independent smoothing
     this.eyes.x += (targetX - this.eyes.x) * k;
     this.eyes.y += (targetY - this.eyes.y) * k;
+  }
+
+  /** Would the body overlap a solid if its top-left were at (x, y)? */
+  private blockedAt(x: number, y: number): boolean {
+    const w = PLAYER_W - 2 * OVERLAP_INSET;
+    const h = PLAYER_H - 2 * OVERLAP_INSET;
+    return this.physics.overlapRect(x + OVERLAP_INSET, y + OVERLAP_INSET, w, h, false, true).length > 0;
+  }
+
+  /**
+   * Rising and the head is about to hit a ceiling: if sliding sideways by a few pixels clears it,
+   * slide (smallest shift wins) and keep the full jump. A wide ceiling still stops you normally.
+   */
+  private correctCorner(dy: number): void {
+    const b = this.body;
+    const maxShift = Math.floor(T.cornerCorrection * TILE);
+    if (maxShift <= 0 || !this.blockedAt(b.x, b.y + dy)) return;
+
+    for (let d = 1; d <= maxShift; d++) {
+      if (!this.blockedAt(b.x - d, b.y + dy)) {
+        this.shift(-d, 0);
+        return;
+      }
+      if (!this.blockedAt(b.x + d, b.y + dy)) {
+        this.shift(d, 0);
+        return;
+      }
+    }
+  }
+
+  /**
+   * In the air, moving into a wall whose top is just above the feet: pop up onto the ledge
+   * instead of sliding down its face.
+   */
+  private correctLedge(dx: number): void {
+    const b = this.body;
+    const maxShift = Math.floor(T.ledgeCorrection * TILE);
+    if (maxShift <= 0 || !this.blockedAt(b.x + dx, b.y)) return;
+
+    for (let d = 1; d <= maxShift; d++) {
+      if (!this.blockedAt(b.x + dx, b.y - d)) {
+        this.shift(0, -d);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Move the body by (dx, dy) plus 1 px in the same direction: blockedAt() tests an inset box, so the
+   * spot it calls "clear" can still overlap the solid by < OVERLAP_INSET, and Arcade would bonk on that.
+   */
+  private shift(dx: number, dy: number): void {
+    this.body.position.x += dx + Math.sign(dx);
+    this.body.position.y += dy + Math.sign(dy);
+    this.body.updateCenter();
+    if (this.debugView) this.debugView.onCorrection(this.feetX, dy !== 0 ? this.feetY : this.body.y);
   }
 
   private jump(): void {
@@ -239,6 +316,7 @@ class PlayerDebug {
   grounded = false;
   vx = 0;
   vy = 0;
+  corrections = 0;
   showHitboxes = false;
   showTrail = true;
   timeScale = 1;
@@ -251,6 +329,7 @@ class PlayerDebug {
   private readonly trail: Phaser.GameObjects.Graphics;
   private readonly label: Phaser.GameObjects.Text;
   private points: Phaser.Types.Math.Vector2Like[] = [];
+  private correctionPoints: Phaser.Types.Math.Vector2Like[] = []; // drawn as cyan dots on the trail
   private startX = 0;
   private startY = 0;
   private apexX = 0;
@@ -280,6 +359,8 @@ class PlayerDebug {
     t.add('fastFallGravityMult', 1, 4, 0.1);
     t.add('coyoteMs', 0, 300, 5);
     t.add('jumpBufferMs', 0, 300, 5);
+    t.add('cornerCorrection', 0, 0.5, 0.01);
+    t.add('ledgeCorrection', 0, 0.5, 0.01);
     t.add('squash', 0, 0.6, 0.01);
     t.add('ghostAlpha', 0, 1, 0.01);
     this.tuning = t;
@@ -289,6 +370,7 @@ class PlayerDebug {
     f.add(this, 'grounded').listen().disable();
     f.add(this, 'vx').name('vx (tiles/s)').listen().disable();
     f.add(this, 'vy').name('vy (tiles/s)').listen().disable();
+    f.add(this, 'corrections').name('corner/ledge fixes').listen().disable();
     f.add(this, 'showHitboxes').name('show hitboxes').onChange(() => this.applyHitboxes());
     f.add(this, 'showTrail').name('show jump trail').onChange(() => this.applyTrailVisibility());
     f.add(this, 'timeScale', 0.1, 1, 0.05).name('time scale').onChange(() => this.applyTimeScale());
@@ -334,6 +416,7 @@ class PlayerDebug {
     this.apexX = this.startX;
     this.apexY = this.startY;
     this.points = [{ x: this.startX, y: this.startY }];
+    this.correctionPoints = [];
     this.tracking = true;
     this.label.setVisible(false);
   }
@@ -350,9 +433,19 @@ class PlayerDebug {
     this.drawTrail();
   }
 
+  onCorrection(x: number, y: number): void {
+    this.corrections++;
+    this.correctionPoints.push({ x: x, y: y });
+    this.drawTrail();
+  }
+
   private drawTrail(): void {
     const g = this.trail;
     g.clear();
+    g.fillStyle(0x66ffff, 1);
+    for (let i = 0; i < this.correctionPoints.length; i++) {
+      g.fillCircle(this.correctionPoints[i].x, this.correctionPoints[i].y, 7);
+    }
     if (this.points.length < 2) return;
     g.lineStyle(3, 0xffffff, 0.8);
     g.strokePoints(this.points, false);
