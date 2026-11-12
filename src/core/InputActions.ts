@@ -5,8 +5,11 @@ import { DEBUG_ENABLED, debug } from './Debug';
 export enum Action {
   Left,
   Right,
-  Down,
+  Up, // aim: raise the throw arc
+  Down, // ground: crouch / sneak. air: fast fall. aim: lower the arc
   Jump,
+  Sprint,
+  Throw, // hold to aim, release to throw
   Reset,
   Count, // number of actions, keep last
 }
@@ -17,11 +20,18 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['KeyA', Action.Left],
   ['ArrowRight', Action.Right],
   ['KeyD', Action.Right],
+  ['ArrowUp', Action.Up],
+  ['KeyW', Action.Up],
   ['ArrowDown', Action.Down],
   ['KeyS', Action.Down],
+  ['KeyC', Action.Down],
   ['Space', Action.Jump],
   ['KeyZ', Action.Jump],
   ['KeyK', Action.Jump],
+  ['ShiftLeft', Action.Sprint],
+  ['ShiftRight', Action.Sprint],
+  ['KeyE', Action.Throw],
+  ['KeyF', Action.Throw],
   ['KeyR', Action.Reset],
 ]);
 

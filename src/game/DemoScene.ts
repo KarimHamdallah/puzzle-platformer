@@ -4,12 +4,15 @@ import { Action, InputActions } from '../core/InputActions';
 import { createAnimations, loadAssets } from './Assets';
 import { CameraRig } from './CameraRig';
 import { ART_SCALE, TILE } from './constants';
+import { NoiseSystem } from './Noise';
 import { Player } from './Player';
+import { Throwables } from './Throwing';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 
 // ---------------------------------------------------------------- level (1 char = 1 tile)
 //   #  solid ground          P  player spawn
-//   C  Clicker               R  Runner          S  Screamer (faces left)
+//   C  Clicker (post)        c  Clicker (patrols)     R  Runner     S  Screamer (faces left)
+//   x  bottle pickup         B  cover crate (crouch behind it to hide)
 //   b  box (decor)           o  stone (decor)
 const MAP: string[] = [
   '#..............................................................................#',
@@ -20,15 +23,15 @@ const MAP: string[] = [
   '#..............................................................................#',
   '#..............................................................................#',
   '#..............................................................................#',
-  '#.......................................................................b..S...#',
+  '#.......................................................................B...S..#',
   '#.....................................................................##########',
   '#.....................................................................##########',
   '#...............................................................###...##########',
   '#.....................................................................##########',
-  '#......................b......######..................................##########',
+  '#......................x......######..................................##########',
   '#...................#######................................###........##########',
   '#...........................................####......................##########',
-  '#..P...b....bo...............C...o..........####..o....R..............##########',
+  '#..P...b.x...o.x.B...........C...o..........####..o.x..R..............##########',
   '######################################....######################################',
   '######################################....######################################',
   '################################################################################',
@@ -36,6 +39,8 @@ const MAP: string[] = [
 
 const MAP_W = MAP[0].length;
 const MAP_H = MAP.length;
+const START_BOTTLES = 0;
+const RESTART_DELAY = 700; // ms between being caught and the level restarting
 
 // Tileset (Exclusion Zone, 9 columns of 32 px tiles): a framed stone panel.
 const PANEL_ROW_FIRST = [0, 9, 18]; // top, middle, bottom rows of the panel
@@ -57,18 +62,23 @@ function isSolid(x: number, y: number): boolean {
 
 /**
  * Demo level. Frame order (like a C++ main loop):
- *   1. physics steps at 60 Hz -> fixedUpdate(dt): player + zombies gameplay
- *   2. update(): input, visuals, camera, parallax (once per rendered frame)
+ *   1. physics steps at 60 Hz -> fixedUpdate(dt): noise, player, bottles, zombies, contacts
+ *   2. update(): input, visuals, camera, parallax, HUD (once per rendered frame)
  *   3. render
  */
 export class DemoScene extends Phaser.Scene {
   private controls!: InputActions;
   private player!: Player;
   private cameraRig!: CameraRig;
+  private noise!: NoiseSystem;
+  private throwables!: Throwables;
   private world!: Phaser.Physics.Arcade.World;
+  private hudCount!: Phaser.GameObjects.Text;
   private zombies: Zombie[] = [];
+  private covers: Phaser.Geom.Rectangle[] = [];
   private zombieDebug: ZombieDebug | null = null;
   private parallax: Phaser.GameObjects.TileSprite[] = [];
+  private restarting = false;
 
   constructor() {
     super('Demo');
@@ -81,54 +91,83 @@ export class DemoScene extends Phaser.Scene {
   create(): void {
     createAnimations(this);
     this.zombies = [];
+    this.covers = [];
     this.parallax = [];
     this.zombieDebug = null;
+    this.restarting = false;
 
     const worldW = MAP_W * TILE;
     const worldH = MAP_H * TILE;
     this.world = this.physics.world;
     this.world.setBounds(0, 0, worldW, worldH);
     this.cameras.main.setRoundPixels(true); // pixel art: no half-pixel shimmer while scrolling
+    this.cameras.main.fadeIn(200);
 
     this.createParallax();
     const solids = this.createLevel();
     this.controls = new InputActions();
+    this.noise = new NoiseSystem(this);
+    this.throwables = new Throwables(this, START_BOTTLES);
     this.spawnEntities();
+    this.player.covers = this.covers;
 
     this.physics.add.collider(this.player.body, solids);
     for (let i = 0; i < this.zombies.length; i++) this.physics.add.collider(this.zombies[i].body, solids);
 
     this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
+    this.createHud();
     if (DEBUG_ENABLED) this.zombieDebug = new ZombieDebug(this, this.zombies);
 
     this.world.on(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
   }
 
-  update(_time: number, deltaMs: number): void {
+  update(time: number, deltaMs: number): void {
     this.controls.update();
-    if (this.controls.pressed(Action.Reset)) {
-      this.player.respawn();
-      this.cameraRig.snap();
-    }
+    if (this.controls.pressed(Action.Reset)) this.restartLevel();
+
     this.player.update(deltaMs);
     for (let i = 0; i < this.zombies.length; i++) this.zombies[i].update();
+    this.throwables.update(time);
+    this.noise.update(deltaMs);
     this.cameraRig.update(deltaMs);
 
     const scrollX = this.cameras.main.scrollX;
     for (let i = 0; i < this.parallax.length; i++) this.parallax[i].tilePositionX = scrollX * PARALLAX[i][1];
-    if (this.zombieDebug) this.zombieDebug.draw();
+    this.hudCount.setText('x ' + this.throwables.count);
+    if (this.zombieDebug) this.zombieDebug.draw(this.player);
   }
 
   private fixedUpdate(dt: number): void {
+    this.noise.beginStep(); // noises emitted last step become audible now
     this.player.fixedUpdate(dt);
-    for (let i = 0; i < this.zombies.length; i++) this.zombies[i].fixedUpdate(dt, this.player);
+    this.throwables.fixedUpdate(dt, this.noise, this.player.body);
+    for (let i = 0; i < this.zombies.length; i++) this.zombies[i].fixedUpdate(dt, this.player, this.noise);
+
+    if (this.player.dead) return;
+    for (let i = 0; i < this.zombies.length; i++) {
+      if (!this.zombies[i].touches(this.player.body)) continue;
+      this.zombies[i].grab();
+      this.player.kill();
+      this.cameras.main.shake(200, 0.006);
+      this.time.delayedCall(RESTART_DELAY, () => this.restartLevel());
+      break;
+    }
+  }
+
+  /** Reliable reset: everything (zombies, bottles, pickups) goes back to the level's start state. */
+  private restartLevel(): void {
+    if (this.restarting) return;
+    this.restarting = true;
+    this.cameras.main.fadeOut(180, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.restart());
   }
 
   /** Our "destructor". Uses this.world: scene.physics.world is already null when SHUTDOWN fires. */
   private shutdown(): void {
     this.world.off(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
     if (this.zombieDebug) this.zombieDebug.destroy();
+    this.throwables.destroy();
     this.cameraRig.destroy();
     this.player.destroy();
     this.controls.destroy();
@@ -144,6 +183,17 @@ export class DemoScene extends Phaser.Scene {
       const layer = this.add.tileSprite(0, 0, w, h, PARALLAX[i][0]).setOrigin(0, 0).setScrollFactor(0).setDepth(-100 + i);
       this.parallax.push(layer);
     }
+  }
+
+  private createHud(): void {
+    this.add.image(48, 44, 'bottle').setScale(ART_SCALE * 2).setScrollFactor(0).setDepth(50);
+    this.hudCount = this.add.text(80, 44, '', {
+      fontFamily: 'Georgia, serif', fontSize: '40px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 6,
+    }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(50);
+    this.add.text(24, this.scale.height - 20,
+      'Move ←→   Sprint Shift   Crouch ↓/C   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Restart R', {
+        fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }
 
   /**
@@ -203,16 +253,25 @@ export class DemoScene extends Phaser.Scene {
         const feetY = (y + 1) * TILE;
         switch (MAP[y][x]) {
           case 'P':
-            this.player = new Player(this, this.controls, feetX, feetY);
+            this.player = new Player(this, this.controls, this.noise, this.throwables, feetX, feetY);
             break;
           case 'C':
-            this.zombies.push(new Zombie(this, ZombieKind.Clicker, feetX, feetY, 1));
+            this.zombies.push(new Zombie(this, ZombieKind.Clicker, feetX, feetY, -1, false));
+            break;
+          case 'c':
+            this.zombies.push(new Zombie(this, ZombieKind.Clicker, feetX, feetY, 1, true));
             break;
           case 'R':
-            this.zombies.push(new Zombie(this, ZombieKind.Runner, feetX, feetY, 1));
+            this.zombies.push(new Zombie(this, ZombieKind.Runner, feetX, feetY, 1, true));
             break;
           case 'S':
-            this.zombies.push(new Zombie(this, ZombieKind.Screamer, feetX, feetY, -1));
+            this.zombies.push(new Zombie(this, ZombieKind.Screamer, feetX, feetY, -1, false));
+            break;
+          case 'x':
+            this.throwables.addPickup(feetX, feetY);
+            break;
+          case 'B':
+            this.addCoverCrate(feetX, feetY);
             break;
           case 'b':
             this.add.image(feetX, feetY, x % 2 === 0 ? 'box1' : 'box2').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);
@@ -223,5 +282,14 @@ export class DemoScene extends Phaser.Scene {
         }
       }
     }
+  }
+
+  /** Two stacked crates (1.5 tiles tall), drawn IN FRONT of the player; crouching inside the area hides you. */
+  private addCoverCrate(feetX: number, feetY: number): void {
+    const bottom = this.add.image(feetX, feetY, 'box3').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(12);
+    this.add.image(feetX, feetY - bottom.displayHeight, 'box1').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(12);
+    const w = bottom.displayWidth;
+    const h = bottom.displayHeight * 2;
+    this.covers.push(new Phaser.Geom.Rectangle(feetX - w / 2, feetY - h, w, h));
   }
 }

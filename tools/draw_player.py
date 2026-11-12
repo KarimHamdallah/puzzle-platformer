@@ -44,6 +44,9 @@ PALETTE = {
     'I': (86, 101, 138),   # jeans highlight
     'O': (74, 51, 40),     # boots
     'o': (43, 28, 23),     # boot sole / shade
+    'Q': (74, 116, 70),    # bottle glass
+    'q': (150, 186, 128),  # bottle glass highlight
+    'N': (40, 62, 40),     # bottle neck / dark glass
 }
 
 
@@ -120,7 +123,8 @@ def solve_ik(root, target, l1, l2, bend):
 
 class Pose:
     def __init__(self, dy=0, lean=0, back_foot=(45, GROUND), front_foot=(51, GROUND),
-                 hand=(54, 64), back_hand=(43, 63), hip_dx=0, hip_dy=None):
+                 hand=(54, 64), back_hand=(43, 63), hip_dx=0, hip_dy=None, bottle=False):
+        self.bottle = bottle        # draw a bottle in the front hand
         self.dy = dy                # upper body vertical offset (bob, crouch, breathing)
         self.hip_dy = dy if hip_dy is None else hip_dy   # hips follow the body unless told otherwise
         self.lean = lean            # upper body shifts right (forward) by this many px
@@ -210,6 +214,15 @@ def draw_arm(c, shoulder, hand, front):
     c.put(round(elbow[0]), round(elbow[1]), 'P' if front else 'r')         # rolled-up cuff
     wx, wy = round(wrist[0]), round(wrist[1])
     c.rect(wx - 1, wy, wx + 1, wy + 2, 'S' if front else 's')              # fist
+    return wx, wy
+
+
+def draw_bottle(c, x, y):
+    """Glass bottle standing upright with its base at (x, y): 3 px wide body, 2 px neck."""
+    c.rect(x - 1, y - 6, x + 1, y, 'Q')
+    c.rect(x - 1, y - 5, x - 1, y - 1, 'q')     # highlight
+    c.rect(x, y - 9, x, y - 7, 'N')             # neck
+    c.put(x, y - 10, 'N')
 
 
 def draw_pose(p):
@@ -231,15 +244,19 @@ def draw_pose(p):
     # front leg, then front arm on top
     c.ox, c.oy = 0, 0
     draw_leg(c, (hip[0] + 2, hip[1]), p.front_foot, front=True)
-    draw_arm(c, (52 + ux, 49 + uy), (p.hand[0] + ux, p.hand[1] + uy), front=True)
+    wx, wy = draw_arm(c, (52 + ux, 49 + uy), (p.hand[0] + ux, p.hand[1] + uy), front=True)
+    if p.bottle:
+        draw_bottle(c, wx, wy + 1)              # held by the neck end, body above the fist
     c.outline()
     return c.image()
 
 
 # ---------------------------------------------------------------- animations
 
-def cycle(frames, stride, lift, stance, bob_down, bob_up, lean, arm_swing, hand_y, back_hand_y):
-    """Walk / run cycle: each leg spends `stance` of the cycle on the ground moving back."""
+def cycle(frames, stride, lift, stance, bob_down, bob_up, lean, arm_swing, hand_y, back_hand_y,
+          base_dy=0, base_hip_dy=0):
+    """Walk / run cycle: each leg spends `stance` of the cycle on the ground moving back.
+    base_dy / base_hip_dy lower the upper body / hips for crouched cycles."""
     poses = []
     for i in range(frames):
         t = i / frames
@@ -256,7 +273,7 @@ def cycle(frames, stride, lift, stance, bob_down, bob_up, lean, arm_swing, hand_
         dy = bob_down if contact else bob_up
         front_x = feet[0][0] - HIP[0]
         back_x = feet[1][0] - HIP[0]
-        poses.append(Pose(dy=dy, lean=lean, front_foot=(feet[0][0] + 2, feet[0][1]),
+        poses.append(Pose(dy=base_dy + dy, hip_dy=base_hip_dy + dy, lean=lean, front_foot=(feet[0][0] + 2, feet[0][1]),
                           back_foot=(feet[1][0] - 2, feet[1][1]),
                           hand=(54 - front_x * arm_swing, hand_y),
                           back_hand=(46 - back_x * arm_swing, back_hand_y)))
@@ -275,7 +292,32 @@ ANIMATIONS = {
              Pose(dy=0, front_foot=(53, 89), back_foot=(44, 89), hand=(59, 54), back_hand=(39, 53))],
     'land': [Pose(dy=4, front_foot=(54, 90), back_foot=(42, 90), hand=(57, 68), back_hand=(42, 66), hip_dx=0),
              Pose(dy=2, front_foot=(53, 90), back_foot=(43, 90), hand=(56, 66), back_hand=(43, 65))],
+
+    # Crouch: hips down 7, chest down 9 and leaning forward; knees bend through the IK.
+    'crouch': [Pose(dy=9, hip_dy=7, lean=2, front_foot=(54, 90), back_foot=(42, 90), hand=(57, 71), back_hand=(44, 69)),
+               Pose(dy=10, hip_dy=7, lean=2, front_foot=(54, 90), back_foot=(42, 90), hand=(57, 72), back_hand=(44, 70))],
+    'sneak': cycle(8, stride=5, lift=2, stance=0.55, bob_down=1, bob_up=0, lean=2,
+                   arm_swing=0.35, hand_y=71, back_hand_y=69, base_dy=9, base_hip_dy=7),
+
+    # Aim: bottle cocked behind the head, off hand pointing at the target, weight on the back foot.
+    # The hand sits high behind the head so the forearm passes over the hair / backpack, never the face,
+    # and the bottle shows above the head.
+    'aim': [Pose(dy=0, lean=-1, front_foot=(54, 90), back_foot=(42, 90), hand=(44, 37), back_hand=(60, 52), bottle=True),
+            Pose(dy=1, hip_dy=0, lean=-1, front_foot=(54, 90), back_foot=(42, 90), hand=(44, 38), back_hand=(60, 53), bottle=True)],
+    # Throw: wind-up -> release (bottle leaves the hand) -> follow-through -> recover.
+    'throw': [Pose(dy=0, lean=-2, front_foot=(54, 90), back_foot=(42, 90), hand=(42, 36), back_hand=(60, 51), bottle=True),
+              Pose(dy=1, lean=2, front_foot=(55, 90), back_foot=(43, 90), hand=(62, 46), back_hand=(44, 60)),
+              Pose(dy=2, lean=3, front_foot=(55, 90), back_foot=(44, 89), hand=(61, 58), back_hand=(43, 62)),
+              Pose(dy=1, lean=1, front_foot=(54, 90), back_foot=(43, 90), hand=(57, 63), back_hand=(44, 63))],
 }
+
+
+def draw_bottle_sprite():
+    """Standalone bottle (pickup + thrown projectile): 9x14 px, centred, outlined."""
+    c = Canvas()
+    draw_bottle(c, 4, 12)
+    c.outline()
+    return c.image().crop((0, 0, 9, 14))
 
 
 def main():
@@ -289,6 +331,7 @@ def main():
             sheet.alpha_composite(draw_pose(pose), (i * FRAME, 0))
         sheet.save(os.path.join(out_dir, 'player_' + name + '.png'))
         sheets[name] = sheet
+    draw_bottle_sprite().save(os.path.join(out_dir, 'bottle.png'))
 
     if preview_dir:  # contact sheet: every animation on its own row, 3x zoom, cropped to the body
         os.makedirs(preview_dir, exist_ok=True)
