@@ -47,8 +47,6 @@ PALETTE = {
     'Q': (74, 116, 70),    # bottle glass
     'q': (150, 186, 128),  # bottle glass highlight
     'N': (40, 62, 40),     # bottle neck / dark glass
-    'M': (120, 122, 128),  # pipe metal
-    'm': (168, 170, 176),  # pipe highlight
 }
 
 
@@ -125,9 +123,8 @@ def solve_ik(root, target, l1, l2, bend):
 
 class Pose:
     def __init__(self, dy=0, lean=0, back_foot=(45, GROUND), front_foot=(51, GROUND),
-                 hand=(54, 64), back_hand=(43, 63), hip_dx=0, hip_dy=None, bottle=False, pipe=None):
+                 hand=(54, 64), back_hand=(43, 63), hip_dx=0, hip_dy=None, bottle=False):
         self.bottle = bottle        # draw a bottle in the front hand
-        self.pipe = pipe            # angle in degrees of a metal pipe held in the front hand (None = no pipe)
         self.dy = dy                # upper body vertical offset (bob, crouch, breathing)
         self.hip_dy = dy if hip_dy is None else hip_dy   # hips follow the body unless told otherwise
         self.lean = lean            # upper body shifts right (forward) by this many px
@@ -250,12 +247,6 @@ def draw_pose(p):
     wx, wy = draw_arm(c, (52 + ux, 49 + uy), (p.hand[0] + ux, p.hand[1] + uy), front=True)
     if p.bottle:
         draw_bottle(c, wx, wy + 1)              # held by the neck end, body above the fist
-    if p.pipe is not None:                      # pipe gripped in the fist, pointing along p.pipe degrees
-        a = math.radians(p.pipe)
-        tip = (wx + math.cos(a) * 15, wy + 1 + math.sin(a) * 15)
-        c.stroke((wx, wy + 1), tip, 2, 'M')
-        c.stroke((wx, wy + 1), tip, 1, 'm')
-        c.rect(wx - 1, wy, wx + 1, wy + 2, 'S')  # fist stays on top of the pipe
     c.outline()
     return c.image()
 
@@ -302,11 +293,15 @@ ANIMATIONS = {
     'land': [Pose(dy=4, front_foot=(54, 90), back_foot=(42, 90), hand=(57, 68), back_hand=(42, 66), hip_dx=0),
              Pose(dy=2, front_foot=(53, 90), back_foot=(43, 90), hand=(56, 66), back_hand=(43, 65))],
 
-    # Crouch: hips down 7, chest down 9 and leaning forward; knees bend through the IK.
-    'crouch': [Pose(dy=9, hip_dy=7, lean=2, front_foot=(54, 90), back_foot=(42, 90), hand=(57, 71), back_hand=(44, 69)),
-               Pose(dy=10, hip_dy=7, lean=2, front_foot=(54, 90), back_foot=(42, 90), hand=(57, 72), back_hand=(44, 70))],
-    'sneak': cycle(8, stride=5, lift=2, stance=0.55, bob_down=1, bob_up=0, lean=2,
-                   arm_swing=0.35, hand_y=71, back_hand_y=69, base_dy=9, base_hip_dy=7),
+    # Crouch: deep (hips -9, chest -11), weight forward, back foot up on its toes, front hand low and
+    # ready near the knee, back hand tucked; 4 frames of slow breathing in the shoulders.
+    'crouch': [Pose(dy=11, hip_dy=9, lean=3, front_foot=(55, 90), back_foot=(41, 89), hand=(59, 73), back_hand=(49, 72)),
+               Pose(dy=11, hip_dy=9, lean=3, front_foot=(55, 90), back_foot=(41, 89), hand=(59, 73), back_hand=(49, 72)),
+               Pose(dy=12, hip_dy=9, lean=3, front_foot=(55, 90), back_foot=(41, 89), hand=(59, 74), back_hand=(49, 73)),
+               Pose(dy=12, hip_dy=9, lean=3, front_foot=(55, 90), back_foot=(41, 89), hand=(59, 74), back_hand=(49, 73))],
+    # Sneak: same deep crouch, long careful steps (60% of the cycle planted), barely lifted feet.
+    'sneak': cycle(8, stride=6, lift=2, stance=0.6, bob_down=1, bob_up=0, lean=3,
+                   arm_swing=0.3, hand_y=73, back_hand_y=72, base_dy=11, base_hip_dy=9),
 
     # Aim: bottle cocked behind the head, off hand pointing at the target, weight on the back foot.
     # The hand sits high behind the head so the forearm passes over the hair / backpack, never the face,
@@ -318,11 +313,11 @@ ANIMATIONS = {
               Pose(dy=1, lean=2, front_foot=(55, 90), back_foot=(43, 90), hand=(62, 46), back_hand=(44, 60)),
               Pose(dy=2, lean=3, front_foot=(55, 90), back_foot=(44, 89), hand=(61, 58), back_hand=(43, 62)),
               Pose(dy=1, lean=1, front_foot=(54, 90), back_foot=(43, 90), hand=(57, 63), back_hand=(44, 63))],
-    # Melee: pipe pulled back over the shoulder -> horizontal strike -> follow-through down -> recover.
-    'attack': [Pose(dy=0, lean=-1, front_foot=(54, 90), back_foot=(42, 90), hand=(46, 42), back_hand=(58, 56), pipe=-120),
-               Pose(dy=1, lean=3, front_foot=(56, 90), back_foot=(43, 90), hand=(61, 51), back_hand=(46, 60), pipe=-5),
-               Pose(dy=2, lean=3, front_foot=(56, 90), back_foot=(44, 89), hand=(60, 60), back_hand=(45, 62), pipe=55),
-               Pose(dy=1, lean=1, front_foot=(54, 90), back_foot=(43, 90), hand=(56, 63), back_hand=(44, 63), pipe=80)],
+    # Punch: guard (fists up at the chest) -> straight punch with a step and the shoulder behind it
+    # -> pull back to guard. Short, so several punches fit in a Runner's dizzy window.
+    'attack': [Pose(dy=1, lean=0, front_foot=(54, 90), back_foot=(42, 90), hand=(52, 55), back_hand=(50, 54)),
+               Pose(dy=1, lean=3, front_foot=(57, 90), back_foot=(43, 90), hand=(65, 51), back_hand=(51, 56)),
+               Pose(dy=1, lean=1, front_foot=(55, 90), back_foot=(42, 90), hand=(57, 55), back_hand=(50, 55))],
 }
 
 

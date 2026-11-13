@@ -40,10 +40,11 @@ class PlayerTuning {
   walkNoise = 5;
   sprintNoise = 8;
   landNoise = 6; // hard landings only
-  combatNoise = 5; // pipe hits
+  combatNoise = 5; // punches that land
   strideLength = 1.1; // tiles between footsteps
   // melee
-  attackReach = 1.1; // tiles in front of the body
+  attackReach = 0.9; // tiles in front of the body
+  stompBounce = 2.2; // tiles: bounce height after jumping on a Runner's head
   // presentation
   squash = 0.22; // squash & stretch strength (0 = off)
   ghostAlpha = 0.22; // takeoff shadow opacity (0 = off)
@@ -59,8 +60,8 @@ const CROUCH_H = Math.round(TILE * 1.15);
 const LAND_ANIM_TIME = 0.12; // s the landing pose is held
 const THROW_TIME = 0.3; // s the throw animation locks movement
 const THROW_RELEASE = 0.08; // s into the throw when the bottle leaves the hand (release frame)
-const ATTACK_TIME = 0.32; // s the pipe swing locks movement
-const ATTACK_HIT = 0.08; // s into the swing when the strike frame lands
+const ATTACK_TIME = 0.2; // s a punch locks movement (short: several fit in a Runner's dizzy window)
+const ATTACK_HIT = 0.06; // s into the punch when the fist lands
 const HIDDEN_TINT = 0x6a6a6a;
 const OVERLAP_INSET = 0.5; // px: the static tree counts touching edges as overlap, so test a slightly smaller box
 
@@ -101,6 +102,7 @@ export class Player {
   grounded = false;
   jumping = false; // in the air because of a jump (not a walk-off): enables jump cut + apex hang
   crouched = false;
+  crouchWanted = false; // crouch is a TOGGLE: one press of Down / S / C
   hidden = false; // crouched behind cover: sighted enemies cannot see him
   dead = false;
   facing = 1;
@@ -211,10 +213,16 @@ export class Player {
     }
     this.grounded = onGround;
 
-    // Crouch on the ground while Down is held; stand up only if there is head room.
-    const wantCrouch = onGround && this.input.held(Action.Down) && !this.aiming;
-    if (wantCrouch && !this.crouched) this.setCrouched(true);
-    else if (!wantCrouch && this.crouched && this.canStand()) this.setCrouched(false);
+    // Crouch toggle: a Down press on the ground flips it (presses in the air / while aiming are eaten,
+    // so a fast-fall or an arc adjustment never toggles crouch on landing). Sprinting, jumping,
+    // falling and aiming stand you up; standing needs head room.
+    if (this.input.buffered(Action.Down, 150)) {
+      this.input.consume(Action.Down);
+      if (onGround && !this.aiming) this.crouchWanted = !this.crouchWanted;
+    }
+    if (!onGround || this.input.held(Action.Sprint) || this.input.held(Action.Throw)) this.crouchWanted = false;
+    if (this.crouchWanted && !this.crouched) this.setCrouched(true);
+    else if (!this.crouchWanted && this.crouched && this.canStand()) this.setCrouched(false);
 
     this.updateThrow(dt, onGround);
     this.updateAttack(dt, onGround);
@@ -244,6 +252,7 @@ export class Player {
     if (canJump && this.input.buffered(Action.Jump, T.jumpBufferMs) && (!this.crouched || this.canStand())) {
       this.input.consume(Action.Jump);
       this.setCrouched(false);
+      this.crouchWanted = false;
       // +half a gravity step: gravity is applied below in this same step, and the fixed-step
       // integrator would otherwise lose ~jumpHeight*dt/timeToApex (≈0.15 tiles) on every jump.
       vy = -(jumpSpeed() + 0.5 * g * dt);
@@ -363,11 +372,23 @@ export class Player {
     }
   }
 
+  /** Jumped on a Runner's head: bounce up like a stomp in Mario (the scene detects the stomp). */
+  bounce(): void {
+    const g = gravity();
+    this.body.setVelocityY(-Math.sqrt(2 * g * T.stompBounce * TILE));
+    this.jumping = true;
+    this.grounded = false;
+    this.lastGroundedAt = -Infinity;
+    this.pulseScale(1 - T.squash * 0.7, 1 + T.squash * 0.7, 180);
+    this.scene.cameras.main.shake(80, 0.004);
+  }
+
   // ---------------------------------------------------------------- melee
 
   /**
-   * Pipe swing. What a hit does is the zombie's call (Zombie.meleeHit): a stunned Runner takes damage,
-   * a Screamer facing away is taken down silently, anything else shrugs it off.
+   * Punch. What it does is the zombie's call (Zombie.meleeHit): a dizzy Runner takes damage, a
+   * distracted Clicker or a Screamer hit from behind is taken down silently, a Clicker that is not
+   * busy grabs you, anything else shrugs it off. Works from a crouch too (sneak up, punch).
    */
   private updateAttack(dt: number, onGround: boolean): void {
     if (this.attackTimer > 0) {
@@ -402,6 +423,10 @@ export class Player {
         this.scene.cameras.main.shake(90, 0.005);
       } else if (result === 'takedown') {
         this.scene.cameras.main.shake(60, 0.003); // silent: no noise
+      } else if (result === 'grab') {
+        z.grab(); // punched a Clicker that wasn't busy: it gets you
+        this.kill();
+        return;
       }
     }
   }
@@ -622,6 +647,7 @@ class PlayerDebug {
     t.add('landNoise', 0, 15, 0.1);
     t.add('combatNoise', 0, 15, 0.1);
     t.add('attackReach', 0.3, 3, 0.05);
+    t.add('stompBounce', 0.5, 5, 0.1);
     t.add('strideLength', 0.3, 3, 0.05);
     t.add('squash', 0, 0.6, 0.01);
     t.add('ghostAlpha', 0, 1, 0.01);

@@ -6,17 +6,21 @@ import { NoiseKind, type Noise, type NoiseSystem } from './Noise';
 import type { Player } from './Player';
 
 /**
- * The three infected types (CraftPix "3 Zombies" sprites):
- *  - Clicker  (Zombie Man)   : BLIND, hears even normal walking. Patrols; walks to any noise whose ring
- *                              reaches it, searches, returns. Cannot be hurt: touching it = caught.
- *  - Runner   (Wild Zombie)  : sees, chases you across the level (runs, jumps up to 2.5 tiles: 3-tile
- *                              ledges are safe). A bottle STUNS it; while stunned, a pipe hit damages it.
- *                              3 hits kill it. Also starts chasing when it hears a scream.
- *  - Screamer (Zombie Woman) : lookout. Turns around on a fixed rhythm (a "?" warns before each turn),
- *                              turns toward noises she hears, sees through line of sight only and not a
- *                              crouched player behind cover. If she sees you or a bottle hits her she
- *                              screams: a huge noise that brings Clickers and sets Runners chasing.
- *                              Killable only by a silent takedown from behind.
+ * The three infected types (CraftPix "3 Zombies" sprites). A player crouched behind a cover crate is
+ * invisible AND untouchable for all of them: hiding is how you break a chase.
+ *
+ *  - Clicker  (Zombie Man)   : BLIND. Senses you within a short radius all around (even sneaking) and
+ *                              hears your footsteps; then it HUNTS you and keeps following your noise.
+ *                              A thrown bottle (or a scream) DISTRACTS it: it walks there and listens.
+ *                              Only while it is distracted can you sneak up and take it down from
+ *                              behind. Punch it any other time and it grabs you.
+ *  - Runner   (Wild Zombie)  : sees (line of sight), chases your last seen position, jumps after you.
+ *                              Jump on its head (Mario stomp) or hit it with a bottle: it gets DIZZY.
+ *                              Punch it while dizzy, several times, until it dies.
+ *  - Screamer (Zombie Woman) : lookout turning around on a fixed rhythm ("?" warns before each turn),
+ *                              turns toward noises, sees through line of sight only. If she sees you, a
+ *                              bottle hits her or you punch her from the front, she screams: Clickers
+ *                              come to her, Runners start chasing. Silent takedown from behind only.
  */
 export enum ZombieKind {
   Clicker,
@@ -27,12 +31,12 @@ export enum ZombieKind {
 enum ZombieState {
   Post, // standing at its post (Screamer: looking around)
   Patrol, // walking back and forth, turning at walls and ledges
-  Investigate, // Clicker: walking to the last noise it heard
-  Search, // Clicker: at the noise, looking around
+  Investigate, // Clicker: walking to a distraction (bottle / scream)
+  Search, // Clicker: listening at the spot (distracted) or looking for you after a hunt
+  Hunt, // Clicker: following the player's noise
   Return, // walking back to its post
-  Chase, // Runner: after the player
-  Stunned, // Runner: dizzy after a bottle hit; harmless and hittable
-  Recover, // Runner: knocked back by a pipe hit
+  Chase, // Runner: after the player's last seen position
+  Stunned, // Runner: dizzy (stomp / bottle); harmless, punch it
   Distracted, // Screamer: staring at a noise
   Alert, // Screamer: sees the player, screaming
   Grab, // caught the player
@@ -41,17 +45,20 @@ enum ZombieState {
 
 class ZombieTuning {
   clickerSpeed = 1.2; // tiles/s (patrol / return)
-  investigateSpeed = 2.6; // tiles/s walking to a noise
-  searchTime = 3; // s looking around at the noise
+  investigateSpeed = 2.6; // tiles/s walking to a distraction
+  huntSpeed = 4.6; // tiles/s following you (faster than walking, slower than sprinting)
+  clickerSense = 2; // tiles all around: senses you even sneaking (not when hidden or when distracted)
+  huntLoseTime = 2.5; // s without hearing you before it stops hunting
+  searchTime = 5; // s listening at a spot: the takedown window (sneak speed 2.2 -> ~11 tiles of approach)
   clickerPause = 1.5; // s idle after turning around on patrol
-  runnerSpeed = 5.5;
+  runnerSpeed = 7.5;
   runnerPatrolSpeed = 2.5;
   runnerPause = 0.5;
-  runnerJump = 2.5; // tiles: can't reach 3-tile ledges
+  runnerJump = 3.3; // tiles: follows you onto 3-tile ledges
   runnerSight = 10; // tiles
-  runnerLoseTime = 3; // s without seeing you before it gives up
-  runnerHealth = 3;
-  stunTime = 2.5; // s dizzy after a bottle hit
+  runnerLoseTime = 5; // s without seeing you before it gives up
+  runnerHealth = 3; // punches while dizzy
+  stunTime = 3; // s dizzy after a stomp / bottle
   screamerSight = 8; // tiles in front of the Screamer
   screamerSightHeight = 1.5; // tiles of vertical tolerance
   screamerLookTime = 4; // s facing one way before turning around
@@ -78,7 +85,7 @@ interface KindInfo {
 
 const KINDS: KindInfo[] = [
   { w: 0.5, h: 1.85, idle: 'zombie_man_idle', walk: 'zombie_man_walk', fast: 'zombie_man_run', alert: 'zombie_man_idle',
-    grab: 'zombie_man_attack', hurt: 'zombie_man_idle', dead: 'zombie_man_idle', jump: 'zombie_man_idle' },
+    grab: 'zombie_man_attack', hurt: 'zombie_man_idle', dead: 'zombie_man_dead', jump: 'zombie_man_idle' },
   { w: 0.9, h: 1.0, idle: 'wild_zombie_idle', walk: 'wild_zombie_run', fast: 'wild_zombie_run', alert: 'wild_zombie_run',
     grab: 'wild_zombie_attack', hurt: 'wild_zombie_hurt', dead: 'wild_zombie_dead', jump: 'wild_zombie_jump' },
   { w: 0.5, h: 1.85, idle: 'zombie_woman_idle', walk: 'zombie_woman_idle', fast: 'zombie_woman_idle', alert: 'zombie_woman_scream',
@@ -89,23 +96,23 @@ const PROBE = 2; // px size of the wall / ledge probes
 const ARRIVE = 0.25; // tiles: close enough to a target x
 const CONTACT_INSET = 6; // px: contact needs real overlap, not a grazing touch
 const TURN_WARNING = 0.7; // s before a Screamer turns around: "?" telegraph
-const RECOVER_TIME = 0.5; // s a Runner staggers after a pipe hit
-const ALERT_MIN_TIME = 1.2; // s a Screamer stays alerted after being hit by a bottle
+const PUNCH_KEEPS_DIZZY = 0.6; // s: a punch never lets the dizzy window end right after it
 
-export type MeleeResult = 'none' | 'hit' | 'takedown';
+export type MeleeResult = 'none' | 'hit' | 'takedown' | 'grab';
 
 export class Zombie {
   readonly kind: ZombieKind;
   readonly body: Phaser.Physics.Arcade.Body;
   state: ZombieState;
   dir: number; // +1 right, -1 left
-  targetX = 0; // Investigate / Return destination
+  targetX = 0; // Investigate / Hunt / Chase / Return destination
   health: number;
+  distracted = false; // Clicker: busy with a bottle / scream (the only time it can be taken down)
 
   private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
   private readonly sprite: Phaser.GameObjects.Sprite;
   private readonly icon: Phaser.GameObjects.Text;
-  private readonly fx: Phaser.GameObjects.Graphics; // stun stars
+  private readonly fx: Phaser.GameObjects.Graphics; // dizzy stars
   private readonly info: KindInfo;
   private readonly patrols: boolean;
   private readonly homeX: number;
@@ -151,7 +158,10 @@ export class Zombie {
   }
 
   get stateName(): string {
-    return ZombieState[this.state] + (this.kind === ZombieKind.Runner && this.alive ? ' hp' + this.health : '');
+    let s = ZombieState[this.state];
+    if (this.distracted) s += '*';
+    if (this.kind === ZombieKind.Runner && this.alive) s += ' hp' + this.health;
+    return s;
   }
 
   get alive(): boolean {
@@ -160,7 +170,7 @@ export class Zombie {
 
   /** Can catch the player right now. */
   get dangerous(): boolean {
-    return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Recover && this.state !== ZombieState.Grab;
+    return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Grab;
   }
 
   /** Real overlap with the player's body (a few px of grace on every side). */
@@ -176,38 +186,47 @@ export class Zombie {
     this.showIcon('', 0);
   }
 
+  /** The player landed on this zombie's head. Runner: dizzy. Returns true if it was a valid stomp. */
+  stomped(): boolean {
+    if (this.kind !== ZombieKind.Runner || !this.alive) return false;
+    this.stun();
+    return true;
+  }
+
   /** A thrown bottle hit this zombie (the bottle also shatters and makes its noise). */
   hitByBottle(): void {
     if (!this.alive) return;
-    if (this.kind === ZombieKind.Runner) {
-      this.setState(ZombieState.Stunned);
-      this.timer = T.stunTime;
-      this.body.setVelocityX(0);
-    } else if (this.kind === ZombieKind.Screamer) {
-      this.setState(ZombieState.Alert);
-      this.alertTimer = ALERT_MIN_TIME;
-      this.timer = 0; // scream right away
-    }
+    if (this.kind === ZombieKind.Runner) this.stun();
+    else if (this.kind === ZombieKind.Screamer) this.startScreaming();
   }
 
-  /** The player's pipe connected. `fromX` = attacker's x, to know "from behind". */
+  /** The player's punch connected. `fromX` = attacker's x, to know "from behind". */
   meleeHit(fromX: number): MeleeResult {
     if (!this.alive) return 'none';
-    if (this.kind === ZombieKind.Runner && this.state === ZombieState.Stunned) {
+    const fromBehind = (fromX - this.feetX) * this.dir < 0;
+
+    if (this.kind === ZombieKind.Runner) {
+      if (this.state !== ZombieState.Stunned) return 'none';
       this.health--;
-      const away = Math.sign(this.feetX - fromX) || 1;
-      this.body.setVelocity(away * 6 * TILE, -5 * TILE);
+      this.body.setVelocityX(Math.sign(this.feetX - fromX) * TILE);
+      this.timer = Math.max(this.timer, PUNCH_KEEPS_DIZZY);
       if (this.health <= 0) this.die();
-      else {
-        this.setState(ZombieState.Recover);
-        this.timer = RECOVER_TIME;
-      }
       return 'hit';
     }
-    if (this.kind === ZombieKind.Screamer && this.state !== ZombieState.Alert && (fromX - this.feetX) * this.dir < 0) {
-      this.die(); // silent takedown from behind
+    if (this.kind === ZombieKind.Clicker) {
+      const busy = this.distracted && (this.state === ZombieState.Investigate || this.state === ZombieState.Search);
+      if (busy && fromBehind) {
+        this.die();
+        return 'takedown';
+      }
+      return 'grab'; // not busy, or from the front: it gets you
+    }
+    // Screamer
+    if (this.state !== ZombieState.Alert && fromBehind) {
+      this.die();
       return 'takedown';
     }
+    this.startScreaming();
     return 'none';
   }
 
@@ -220,7 +239,7 @@ export class Zombie {
       if (b.blocked.down) b.setVelocityX(0);
       return;
     }
-    if (this.kind === ZombieKind.Clicker) this.clicker(dt, noise);
+    if (this.kind === ZombieKind.Clicker) this.clicker(dt, player, noise);
     else if (this.kind === ZombieKind.Runner) this.runner(dt, player, noise);
     else this.screamer(dt, player, noise);
   }
@@ -247,14 +266,14 @@ export class Zombie {
     switch (this.state) {
       case ZombieState.Dead: anim = this.info.dead; break;
       case ZombieState.Grab: anim = this.info.grab; break;
-      case ZombieState.Stunned:
-      case ZombieState.Recover: anim = this.info.hurt; break;
+      case ZombieState.Stunned: anim = this.info.hurt; break;
       case ZombieState.Alert: anim = this.info.alert; break;
       case ZombieState.Investigate:
+      case ZombieState.Hunt:
       case ZombieState.Chase: anim = moving ? this.info.fast : this.info.idle; break;
       default: anim = moving ? this.info.walk : this.info.idle;
     }
-    if (this.kind === ZombieKind.Runner && !this.body.blocked.down && this.alive && this.state === ZombieState.Chase) anim = this.info.jump;
+    if (this.kind === ZombieKind.Runner && !this.body.blocked.down && this.state === ZombieState.Chase) anim = this.info.jump;
     if (this.restartAnim) {
       this.sprite.play(anim);
       this.restartAnim = false;
@@ -265,14 +284,25 @@ export class Zombie {
 
   // ---------------------------------------------------------------- Clicker
 
-  private clicker(dt: number, noise: NoiseSystem): void {
+  private clicker(dt: number, player: Player, noise: NoiseSystem): void {
     const b = this.body;
-    const heard = this.loudestHeard(noise, false);
-    if (heard) {
-      this.targetX = heard.x;
+    const lure = this.lastHeard(noise, true);
+    const steps = this.lastHeard(noise, false);
+    const sensed = !this.distracted && this.senses(player);
+
+    if (lure) { // bottle / scream: go and listen there
+      this.targetX = lure.x;
       this.state = ZombieState.Investigate;
+      this.distracted = true;
       this.showIcon('!', 0.8);
+    } else if (steps || sensed) { // your footsteps, or you are right next to it: hunt you
+      if (this.state !== ZombieState.Hunt) this.showIcon('!', 0.8);
+      this.state = ZombieState.Hunt;
+      this.distracted = false;
+      this.targetX = steps ? steps.x : player.feetX;
+      this.timer = T.huntLoseTime;
     }
+
     switch (this.state) {
       case ZombieState.Post:
         b.setVelocityX(0);
@@ -281,22 +311,30 @@ export class Zombie {
         this.patrol(dt, T.clickerSpeed, T.clickerPause);
         break;
       case ZombieState.Investigate:
-        if (this.walkTo(this.targetX, T.investigateSpeed)) {
-          this.state = ZombieState.Search;
-          this.timer = T.searchTime;
-          this.lookTimer = 0.9;
-          this.showIcon('?', T.searchTime);
+        if (this.walkTo(this.targetX, T.investigateSpeed)) this.startSearch();
+        break;
+      case ZombieState.Hunt:
+        this.walkTo(this.targetX, T.huntSpeed);
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          this.distracted = false;
+          this.startSearch();
         }
         break;
       case ZombieState.Search:
         b.setVelocityX(0);
         this.timer -= dt;
-        this.lookTimer -= dt;
-        if (this.lookTimer <= 0) {
-          this.dir = -this.dir; // looks around
-          this.lookTimer = 0.9;
+        if (!this.distracted) { // looking for you: turns around; listening to a lure: keeps facing it
+          this.lookTimer -= dt;
+          if (this.lookTimer <= 0) {
+            this.dir = -this.dir;
+            this.lookTimer = 0.9;
+          }
         }
-        if (this.timer <= 0) this.state = ZombieState.Return;
+        if (this.timer <= 0) {
+          this.distracted = false;
+          this.state = ZombieState.Return;
+        }
         break;
       case ZombieState.Return:
         if (this.walkTo(this.homeX, T.clickerSpeed)) {
@@ -307,25 +345,43 @@ export class Zombie {
     }
   }
 
+  private startSearch(): void {
+    this.state = ZombieState.Search;
+    this.timer = T.searchTime;
+    this.lookTimer = 0.9;
+    this.showIcon('?', T.searchTime);
+  }
+
+  /** Clicker's close-range sense: all around, works on a sneaking player, not on a hidden one. */
+  private senses(player: Player): boolean {
+    if (player.hidden || player.dead) return false;
+    const headY = this.feetY - this.body.height * 0.5;
+    const py = player.feetY - player.body.height * 0.5;
+    return Phaser.Math.Distance.Between(this.feetX, headY, player.feetX, py) <= T.clickerSense * TILE;
+  }
+
   // ---------------------------------------------------------------- Runner
 
   private runner(dt: number, player: Player, noise: NoiseSystem): void {
     const b = this.body;
-    switch (this.state) {
-      case ZombieState.Stunned:
-        if (b.blocked.down) b.setVelocityX(0);
-        this.timer -= dt;
-        if (this.timer <= 0) this.startChase();
-        return;
-      case ZombieState.Recover:
-        if (b.blocked.down) b.setVelocityX(b.velocity.x * 0.85);
-        this.timer -= dt;
-        if (this.timer <= 0) this.startChase();
-        return;
+    if (this.state === ZombieState.Stunned) {
+      if (b.blocked.down) b.setVelocityX(b.velocity.x * 0.8);
+      this.timer -= dt;
+      if (this.timer <= 0) {
+        this.state = ZombieState.Chase;
+        this.targetX = player.feetX;
+        this.timer = T.runnerLoseTime;
+        this.showIcon('!', 0.8);
+      }
+      return;
     }
 
-    const scream = this.loudestHeard(noise, true);
-    if (this.state !== ZombieState.Chase && (scream || this.runnerSees(player, true))) this.startChase();
+    const scream = this.lastHeard(noise, true, true);
+    if (scream && this.state !== ZombieState.Chase) {
+      this.startChase(scream.x);
+    } else if (this.state !== ZombieState.Chase && this.runnerSees(player, true)) {
+      this.startChase(player.feetX);
+    }
 
     switch (this.state) {
       case ZombieState.Patrol:
@@ -335,30 +391,47 @@ export class Zombie {
         if (this.walkTo(this.homeX, T.runnerPatrolSpeed)) this.state = ZombieState.Patrol;
         break;
       case ZombieState.Chase: {
-        if (this.runnerSees(player, false)) this.timer = T.runnerLoseTime;
-        else this.timer -= dt;
+        if (this.runnerSees(player, false)) {
+          this.targetX = player.feetX; // only what it can SEE: hiding sends it to your last seen spot
+          this.timer = T.runnerLoseTime;
+        } else {
+          this.timer -= dt;
+        }
         if (this.timer <= 0) {
           this.state = ZombieState.Return;
           this.showIcon('?', 1);
           break;
         }
-        const dx = player.feetX - this.feetX;
-        if (Math.abs(dx) > ARRIVE * TILE) this.dir = Math.sign(dx);
         if (!b.blocked.down) break; // keep momentum in the air
+        const dx = this.targetX - this.feetX;
+        if (Math.abs(dx) <= ARRIVE * TILE) {
+          b.setVelocityX(0);
+          if (this.iconTimer <= 0) this.showIcon('?', 0.6); // lost you: looking around
+          break;
+        }
+        this.dir = Math.sign(dx);
         if (this.wallAhead() || !this.groundAhead()) {
           b.setVelocity(this.dir * T.runnerSpeed * TILE, -Math.sqrt(2 * T.gravity * TILE * T.runnerJump * TILE));
         } else {
-          b.setVelocityX(Math.abs(dx) > ARRIVE * TILE ? this.dir * T.runnerSpeed * TILE : 0);
+          b.setVelocityX(this.dir * T.runnerSpeed * TILE);
         }
         break;
       }
     }
   }
 
-  private startChase(): void {
-    if (this.state !== ZombieState.Chase) this.showIcon('!', 0.8);
+  private startChase(x: number): void {
+    this.showIcon('!', 0.8);
     this.state = ZombieState.Chase;
+    this.targetX = x;
     this.timer = T.runnerLoseTime;
+  }
+
+  private stun(): void {
+    this.setState(ZombieState.Stunned);
+    this.timer = T.stunTime;
+    this.body.setVelocityX(0);
+    this.showIcon('', 0);
   }
 
   private runnerSees(player: Player, needFacing: boolean): boolean {
@@ -391,7 +464,7 @@ export class Zombie {
       this.lookTimer = T.screamerLookTime;
     }
 
-    const heard = this.loudestHeard(noise, false);
+    const heard = this.lastHeard(noise, false) ?? this.lastHeard(noise, true);
     if (heard) { // turns toward the sound and stares at it
       this.dir = Math.sign(heard.x - this.feetX) || this.dir;
       this.state = ZombieState.Distracted;
@@ -414,6 +487,13 @@ export class Zombie {
       this.dir = -this.dir;
       this.lookTimer = T.screamerLookTime;
     }
+  }
+
+  private startScreaming(): void {
+    if (!this.alive) return;
+    this.state = ZombieState.Alert;
+    this.alertTimer = 1.2;
+    this.timer = 0; // scream right away
   }
 
   /** Screamer sight: in front, in range, not hidden behind cover, nothing solid in between. */
@@ -440,12 +520,19 @@ export class Zombie {
 
   // ---------------------------------------------------------------- shared
 
-  /** Most recent noise whose ring reaches this zombie's head. screamsOnly: Runners only react to screams. */
-  private loudestHeard(noise: NoiseSystem, screamsOnly: boolean): Noise | null {
+  /**
+   * Most recent noise whose ring reaches this zombie's head.
+   *  lures = true  : bottles and screams (things to investigate)
+   *  lures = false : the player's own noises (footsteps, landings, punches)
+   * screamsOnly narrows lures to screams (Runners don't care about bottles).
+   */
+  private lastHeard(noise: NoiseSystem, lures: boolean, screamsOnly: boolean = false): Noise | null {
     const headY = this.feetY - this.body.height * 0.8;
     let found: Noise | null = null;
     for (let i = 0; i < noise.heard.length; i++) {
       const n = noise.heard[i];
+      const isLure = n.kind === NoiseKind.Bottle || n.kind === NoiseKind.Scream;
+      if (isLure !== lures) continue;
       if (screamsOnly && n.kind !== NoiseKind.Scream) continue;
       if (this.kind === ZombieKind.Screamer && n.kind === NoiseKind.Scream) continue; // her own voice
       if (Phaser.Math.Distance.Between(n.x, n.y, this.feetX, headY) <= n.radius) found = n;
@@ -488,6 +575,7 @@ export class Zombie {
 
   private die(): void {
     this.setState(ZombieState.Dead);
+    this.distracted = false;
     this.showIcon('', 0);
   }
 
@@ -516,8 +604,8 @@ export class Zombie {
 
 /**
  * Debug view for all zombies: "zombie tuning" sliders + "zombies" folder with an overlay:
- * state (and Runner health) under each zombie, Clicker destinations, Screamer sight area
- * (red while alert) and her line of sight to the player (green clear / red blocked).
+ * state under each zombie ("*" = distracted, Runner health), Clicker sense radius and destination,
+ * Screamer sight area (red while alert) and her line of sight to the player.
  */
 export class ZombieDebug {
   showSenses = true;
@@ -533,16 +621,19 @@ export class ZombieDebug {
     const t = new TuningFolder('zombie tuning', T);
     t.add('clickerSpeed', 0, 6, 0.1);
     t.add('investigateSpeed', 0, 8, 0.1);
+    t.add('huntSpeed', 0, 10, 0.1);
+    t.add('clickerSense', 0, 6, 0.1);
+    t.add('huntLoseTime', 0, 10, 0.1);
     t.add('searchTime', 0, 10, 0.1);
     t.add('clickerPause', 0, 5, 0.1);
-    t.add('runnerSpeed', 0, 12, 0.1);
+    t.add('runnerSpeed', 0, 14, 0.1);
     t.add('runnerPatrolSpeed', 0, 8, 0.1);
     t.add('runnerPause', 0, 5, 0.1);
-    t.add('runnerJump', 0, 5, 0.1);
+    t.add('runnerJump', 0, 6, 0.1);
     t.add('runnerSight', 0, 20, 0.5);
-    t.add('runnerLoseTime', 0, 10, 0.1);
+    t.add('runnerLoseTime', 0, 15, 0.1);
     t.add('runnerHealth', 1, 10, 1);
-    t.add('stunTime', 0.2, 6, 0.1);
+    t.add('stunTime', 0.2, 8, 0.1);
     t.add('screamerSight', 0, 20, 0.5);
     t.add('screamerSightHeight', 0, 5, 0.1);
     t.add('screamerLookTime', 0.5, 10, 0.1);
@@ -578,15 +669,21 @@ export class ZombieDebug {
       label.setText(z.stateName).setPosition(z.feetX, z.feetY + 6);
       if (!z.alive) continue;
 
-      if (z.kind === ZombieKind.Clicker && (z.stateName === 'Investigate' || z.stateName === 'Return')) {
-        g.lineStyle(2, 0xffe066, 0.8);
-        g.lineBetween(z.feetX, z.feetY - 10, z.targetX, z.feetY - 10);
-        g.fillStyle(0xffe066, 1).fillCircle(z.targetX, z.feetY - 10, 6);
+      if (z.kind === ZombieKind.Clicker) {
+        if (!z.distracted) { // the close-range sense
+          g.lineStyle(2, 0x66ccff, 0.5);
+          g.strokeCircle(z.feetX, z.feetY - z.body.height * 0.5, T.clickerSense * TILE);
+        }
+        if (z.state === ZombieState.Investigate || z.state === ZombieState.Hunt || z.state === ZombieState.Return) {
+          g.lineStyle(2, 0xffe066, 0.8);
+          g.lineBetween(z.feetX, z.feetY - 10, z.targetX, z.feetY - 10);
+          g.fillStyle(0xffe066, 1).fillCircle(z.targetX, z.feetY - 10, 6);
+        }
       } else if (z.kind === ZombieKind.Screamer) {
         const w = T.screamerSight * TILE;
         const band = T.screamerSightHeight * TILE;
         const x = z.dir > 0 ? z.feetX : z.feetX - w;
-        const alert = z.stateName === 'Alert';
+        const alert = z.state === ZombieState.Alert;
         g.fillStyle(alert ? 0xff3030 : 0xffee55, alert ? 0.3 : 0.15);
         g.fillRect(x, z.feetY - band, w, band * 2); // where the player's FEET must be
         if (Phaser.Math.Distance.Between(z.feetX, z.feetY, player.feetX, player.feetY) > w * 1.5) continue; // only near her

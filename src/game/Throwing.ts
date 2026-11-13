@@ -57,6 +57,7 @@ interface Pickup {
   x: number;
   y: number;
   sprite: Phaser.GameObjects.Image;
+  glow: Phaser.GameObjects.Graphics;
 }
 
 /**
@@ -108,10 +109,21 @@ export class Throwables {
     if (this.tuning) this.tuning.destroy();
   }
 
-  /** A stash of bottles lying in the environment: walking over it gives `stashSize` bottles. */
+  /**
+   * A stash of bottles lying in the environment: walking over it gives `stashSize` bottles.
+   * Drawn IN FRONT of the grass (depth 11) with a warm pulsing glow, so it always reads as a pickup.
+   */
   addPickup(feetX: number, feetY: number): void {
-    const sprite = this.scene.add.image(feetX, feetY, 'stash').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(2);
-    this.pickups.push({ x: feetX, y: feetY, sprite: sprite });
+    const glow = this.scene.add.graphics({ x: feetX, y: feetY - 26 }).setDepth(13);
+    glow.fillStyle(0xffd27a, 0.3).fillCircle(0, 0, 42);
+    glow.fillStyle(0xffe6a8, 0.45).fillCircle(0, 0, 26);
+    // a 4-point sparkle above the stash, twinkling
+    glow.fillStyle(0xffffff, 1);
+    glow.fillTriangle(-3, -44, 3, -44, 0, -60).fillTriangle(-3, -44, 3, -44, 0, -28);
+    glow.fillTriangle(-8, -47, -8, -41, -16, -44).fillTriangle(8, -47, 8, -41, 16, -44);
+    this.scene.tweens.add({ targets: glow, scale: 1.2, alpha: 0.55, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    const sprite = this.scene.add.image(feetX, feetY, 'stash').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(14);
+    this.pickups.push({ x: feetX, y: feetY, sprite: sprite, glow: glow });
   }
 
   throwBottle(x: number, y: number, v: Vec): void {
@@ -147,6 +159,7 @@ export class Throwables {
       if (near) {
         this.count += THROW.stashSize;
         p.sprite.destroy();
+        p.glow.destroy();
         this.pickups.splice(i, 1);
       }
     }
@@ -161,7 +174,7 @@ export class Throwables {
     }
     for (let i = 0; i < this.pickups.length; i++) {
       const p = this.pickups[i];
-      p.sprite.y = p.y - 4 - Math.sin(timeMs / 300 + p.x) * 4; // gentle bob so pickups read as pickups
+      p.sprite.y = p.y - 14 - Math.sin(timeMs / 300 + p.x) * 5; // floats above the grass, gentle bob
     }
   }
 
