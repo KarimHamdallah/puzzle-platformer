@@ -36,11 +36,12 @@ class PlayerTuning {
   jumpBufferMs = 120; // a jump pressed this long before landing still happens
   cornerCorrection = 0.3; // tiles: head would clip a ceiling corner by up to this -> slide past it
   ledgeCorrection = 0.2; // tiles: feet miss a ledge top by up to this while moving into it -> pop up
-  // noise (tiles a sound carries): Clickers hear normal walking too, only sneaking is silent
-  walkNoise = 5;
-  sprintNoise = 8;
-  landNoise = 6; // hard landings only
-  combatNoise = 5; // punches that land
+  // noise (tiles a sound carries). Hearing is the Clicker's strength: walking carries far, sprinting
+  // further; only sneaking is silent (a Clicker still senses you within 2 tiles).
+  walkNoise = 8;
+  sprintNoise = 14;
+  landNoise = 8; // hard landings only
+  combatNoise = 7; // punches that land
   strideLength = 1.1; // tiles between footsteps
   // melee
   attackReach = 0.9; // tiles in front of the body

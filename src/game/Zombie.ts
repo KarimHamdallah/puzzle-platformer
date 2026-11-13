@@ -51,7 +51,7 @@ class ZombieTuning {
   huntLoseTime = 2.5; // s without hearing you before it stops hunting
   searchTime = 5; // s listening at a spot: the takedown window (sneak speed 2.2 -> ~11 tiles of approach)
   clickerPause = 1.5; // s idle after turning around on patrol
-  runnerSpeed = 7.5;
+  runnerSpeed = 9; // faster than the player's sprint (8.5): you can't outrun it, stomp it or hide
   runnerPatrolSpeed = 2.5;
   runnerPause = 0.5;
   runnerJump = 3.3; // tiles: follows you onto 3-tile ledges
