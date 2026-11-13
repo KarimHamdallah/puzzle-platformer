@@ -2,8 +2,10 @@ import Phaser from 'phaser';
 import { DEBUG_ENABLED, TuningFolder } from '../core/Debug';
 import { ART_SCALE, TILE } from './constants';
 import { NoiseKind, type NoiseSystem } from './Noise';
+import type { Zombie } from './Zombie';
 
 class ThrowTuning {
+  stashSize = 3; // bottles in one stash pickup
   bottleNoise = 8; // tiles: how far a shattering bottle is heard
   gravity = 28; // tiles/s²
   maxDistance = 14; // tiles, either side
@@ -62,6 +64,8 @@ interface Pickup {
  */
 export class Throwables {
   count: number;
+  /** The infected, so bottles (and the aim preview) can hit them; the scene fills this. */
+  zombies: Zombie[] = [];
 
   private readonly scene: Phaser.Scene;
   private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
@@ -86,6 +90,7 @@ export class Throwables {
 
     if (DEBUG_ENABLED) {
       const t = new TuningFolder('throw tuning', THROW);
+      t.add('stashSize', 1, 10, 1);
       t.add('bottleNoise', 1, 20, 0.5);
       t.add('gravity', 5, 80, 1);
       t.add('maxDistance', 2, 30, 0.5);
@@ -103,8 +108,9 @@ export class Throwables {
     if (this.tuning) this.tuning.destroy();
   }
 
+  /** A stash of bottles lying in the environment: walking over it gives `stashSize` bottles. */
   addPickup(feetX: number, feetY: number): void {
-    const sprite = this.scene.add.image(feetX, feetY, 'bottle').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(2);
+    const sprite = this.scene.add.image(feetX, feetY, 'stash').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(2);
     this.pickups.push({ x: feetX, y: feetY, sprite: sprite });
   }
 
@@ -115,15 +121,18 @@ export class Throwables {
     this.flying.push(new Bottle(sprite, x, y, v.x, v.y));
   }
 
-  /** Gameplay at the physics rate: flight, impacts (noise), pickups. */
+  /** Gameplay at the physics rate: flight, impacts (zombies, solids -> noise), pickups. */
   fixedUpdate(dt: number, noise: NoiseSystem, playerBody: Phaser.Physics.Arcade.Body): void {
+    const zombies = this.zombies;
     const g = THROW.gravity * TILE;
     for (let i = this.flying.length - 1; i >= 0; i--) {
       const b = this.flying[i];
       b.vy += g * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
-      if (this.hitsSolid(b.x, b.y)) {
+      const hit = this.hitZombie(b.x, b.y, zombies);
+      if (hit) hit.hitByBottle();
+      if (hit || this.hitsSolid(b.x, b.y)) {
         this.shatter(b.x, b.y);
         noise.emit(b.x, b.y, THROW.bottleNoise, NoiseKind.Bottle);
         b.sprite.destroy();
@@ -136,7 +145,7 @@ export class Throwables {
       const p = this.pickups[i];
       const near = p.x > playerBody.left - r && p.x < playerBody.right + r && p.y > playerBody.top && p.y < playerBody.bottom + r;
       if (near) {
-        this.count++;
+        this.count += THROW.stashSize;
         p.sprite.destroy();
         this.pickups.splice(i, 1);
       }
@@ -157,18 +166,19 @@ export class Throwables {
   }
 
   /**
-   * Aim preview: dotted arc along the exact path the bottle will take (same integrator, same step),
-   * a landing marker, and the noise radius at the landing point (who will hear it).
+   * Aim preview: dotted arc along the exact path the bottle will take (same integrator, same step,
+   * stops on solids AND on zombies), a landing marker (red = it will hit a zombie), and the noise
+   * radius at the landing point (who will hear it).
    */
   drawAim(x: number, y: number, v: Vec): void {
-    this.predict(x, y, v);
+    const hitsZombie = this.predict(x, y, v);
     const g = this.aimGfx;
     g.clear();
     g.fillStyle(0xffffff, 0.9);
     for (let i = 0; i < this.path.length; i += 3) g.fillCircle(this.path[i].x, this.path[i].y, 3);
     const end = this.path[this.path.length - 1];
-    g.lineStyle(3, 0xffe066, 1);
-    g.strokeCircle(end.x, end.y, 10);
+    g.lineStyle(hitsZombie ? 5 : 3, hitsZombie ? 0xff4040 : 0xffe066, 1);
+    g.strokeCircle(end.x, end.y, hitsZombie ? 16 : 10);
     g.lineStyle(2, 0xffe066, 0.35);
     g.strokeCircle(end.x, end.y, THROW.bottleNoise * TILE);
   }
@@ -177,7 +187,8 @@ export class Throwables {
     this.aimGfx.clear();
   }
 
-  private predict(x: number, y: number, v: Vec): void {
+  /** Fills `path`; returns true if the flight ends on a zombie (as things stand right now). */
+  private predict(x: number, y: number, v: Vec): boolean {
     this.path.length = 0;
     const g = THROW.gravity * TILE;
     let px = x;
@@ -189,8 +200,18 @@ export class Throwables {
       px += v.x * STEP;
       py += vy * STEP;
       this.path.push({ x: px, y: py });
-      if (this.hitsSolid(px, py)) return;
+      if (this.hitZombie(px, py, this.zombies)) return true;
+      if (this.hitsSolid(px, py)) return false;
     }
+    return false;
+  }
+
+  private hitZombie(x: number, y: number, zombies: Zombie[]): Zombie | null {
+    for (let i = 0; i < zombies.length; i++) {
+      const b = zombies[i].body;
+      if (zombies[i].alive && x > b.left && x < b.right && y > b.top && y < b.bottom) return zombies[i];
+    }
+    return null;
   }
 
   private hitsSolid(x: number, y: number): boolean {

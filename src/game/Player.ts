@@ -5,6 +5,7 @@ import { Action, type InputActions } from '../core/InputActions';
 import { ART_SCALE, TILE } from './constants';
 import { NoiseKind, type NoiseSystem } from './Noise';
 import { THROW, launchVelocity, type Throwables } from './Throwing';
+import type { Zombie } from './Zombie';
 
 /**
  * Every movement number, in TILES and SECONDS (never pixels).
@@ -35,11 +36,14 @@ class PlayerTuning {
   jumpBufferMs = 120; // a jump pressed this long before landing still happens
   cornerCorrection = 0.3; // tiles: head would clip a ceiling corner by up to this -> slide past it
   ledgeCorrection = 0.2; // tiles: feet miss a ledge top by up to this while moving into it -> pop up
-  // noise (tiles a sound carries)
-  walkNoise = 2.5;
-  sprintNoise = 6;
-  landNoise = 5; // hard landings only
+  // noise (tiles a sound carries): Clickers hear normal walking too, only sneaking is silent
+  walkNoise = 5;
+  sprintNoise = 8;
+  landNoise = 6; // hard landings only
+  combatNoise = 5; // pipe hits
   strideLength = 1.1; // tiles between footsteps
+  // melee
+  attackReach = 1.1; // tiles in front of the body
   // presentation
   squash = 0.22; // squash & stretch strength (0 = off)
   ghostAlpha = 0.22; // takeoff shadow opacity (0 = off)
@@ -55,6 +59,8 @@ const CROUCH_H = Math.round(TILE * 1.15);
 const LAND_ANIM_TIME = 0.12; // s the landing pose is held
 const THROW_TIME = 0.3; // s the throw animation locks movement
 const THROW_RELEASE = 0.08; // s into the throw when the bottle leaves the hand (release frame)
+const ATTACK_TIME = 0.32; // s the pipe swing locks movement
+const ATTACK_HIT = 0.08; // s into the swing when the strike frame lands
 const HIDDEN_TINT = 0x6a6a6a;
 const OVERLAP_INSET = 0.5; // px: the static tree counts touching edges as overlap, so test a slightly smaller box
 
@@ -68,6 +74,7 @@ enum PlayerState {
   Fall,
   Aim,
   Throw,
+  Attack,
   Dead,
 }
 
@@ -97,8 +104,9 @@ export class Player {
   hidden = false; // crouched behind cover: sighted enemies cannot see him
   dead = false;
   facing = 1;
-  /** Cover areas (crates); the scene fills this. */
+  /** Cover areas (crates) and the infected, for hiding and melee; the scene fills these. */
   covers: Phaser.Geom.Rectangle[] = [];
+  zombies: Zombie[] = [];
 
   private readonly scene: Phaser.Scene;
   private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
@@ -114,6 +122,9 @@ export class Player {
   private throwTimer = 0;
   private throwPending = false; // bottle not released yet in the current throw
   private restartThrowAnim = false;
+  private attackTimer = 0;
+  private attackPending = false; // strike not resolved yet in the current swing
+  private restartAttackAnim = false;
   private landTimer = 0;
   private stepDistance = 0; // px walked since the last footstep
   private simTime = 0; // seconds of physics time (stops in slow motion, unlike real time)
@@ -206,12 +217,13 @@ export class Player {
     else if (!wantCrouch && this.crouched && this.canStand()) this.setCrouched(false);
 
     this.updateThrow(dt, onGround);
+    this.updateAttack(dt, onGround);
 
     // Horizontal: gait speed, then accel / decel / turn toward it.
     let gaitSpeed = T.walkSpeed;
     if (this.crouched) gaitSpeed = T.sneakSpeed;
     else if (this.input.held(Action.Sprint)) gaitSpeed = T.sprintSpeed;
-    const locked = this.aiming || this.throwTimer > 0;
+    const locked = this.aiming || this.throwTimer > 0 || this.attackTimer > 0;
     const target = locked ? 0 : this.input.moveX * gaitSpeed * TILE;
     let vx = b.velocity.x;
     let time: number;
@@ -275,6 +287,7 @@ export class Player {
     switch (this.state) {
       case PlayerState.Dead: anim = 'player_land'; break;
       case PlayerState.Throw: anim = 'player_throw'; break;
+      case PlayerState.Attack: anim = 'player_attack'; break;
       case PlayerState.Aim: anim = 'player_aim'; break;
       case PlayerState.Jump: anim = 'player_jump'; break;
       case PlayerState.Fall: anim = 'player_fall'; break;
@@ -288,6 +301,9 @@ export class Player {
     if (this.restartThrowAnim) {
       this.sprite.play('player_throw'); // restart even if the previous throw is still the current anim
       this.restartThrowAnim = false;
+    } else if (this.restartAttackAnim) {
+      this.sprite.play('player_attack');
+      this.restartAttackAnim = false;
     } else {
       this.sprite.play(anim, true); // true = keep playing if it is already the current animation
     }
@@ -318,7 +334,8 @@ export class Player {
     const throwHeld = this.input.held(Action.Throw);
     if (!this.aiming) {
       // A fresh press (not consumed) starts aiming: holding the key after a throw does not re-aim.
-      if (throwHeld && this.input.buffered(Action.Throw, 200) && onGround && !this.crouched && this.throwables.count > 0) {
+      if (throwHeld && this.input.buffered(Action.Throw, 200) && onGround && !this.crouched && this.attackTimer <= 0
+        && this.throwables.count > 0) {
         this.input.consume(Action.Throw);
         this.aiming = true;
         this.aimDistance = THROW.startDistance * this.facing;
@@ -343,6 +360,49 @@ export class Player {
       this.throwTimer = THROW_TIME;
       this.throwPending = true;
       this.restartThrowAnim = true;
+    }
+  }
+
+  // ---------------------------------------------------------------- melee
+
+  /**
+   * Pipe swing. What a hit does is the zombie's call (Zombie.meleeHit): a stunned Runner takes damage,
+   * a Screamer facing away is taken down silently, anything else shrugs it off.
+   */
+  private updateAttack(dt: number, onGround: boolean): void {
+    if (this.attackTimer > 0) {
+      this.attackTimer -= dt;
+      if (this.attackPending && this.attackTimer <= ATTACK_TIME - ATTACK_HIT) {
+        this.attackPending = false;
+        this.strike();
+      }
+      return;
+    }
+    if (this.aiming || this.throwTimer > 0 || !onGround) return;
+    if (!this.input.buffered(Action.Attack, 150)) return;
+    this.input.consume(Action.Attack);
+    this.attackTimer = ATTACK_TIME;
+    this.attackPending = true;
+    this.restartAttackAnim = true;
+  }
+
+  private strike(): void {
+    const b = this.body;
+    const reach = T.attackReach * TILE;
+    const left = this.facing > 0 ? b.right : b.left - reach;
+    const top = b.bottom - PLAYER_H; // a full-height swing even when crouched
+    for (let i = 0; i < this.zombies.length; i++) {
+      const z = this.zombies[i];
+      if (!z.alive) continue;
+      const zb = z.body;
+      if (zb.right < left || zb.left > left + reach || zb.bottom < top || zb.top > b.bottom) continue;
+      const result = z.meleeHit(this.feetX);
+      if (result === 'hit') {
+        this.noise.emit(zb.center.x, zb.center.y, T.combatNoise, NoiseKind.Combat);
+        this.scene.cameras.main.shake(90, 0.005);
+      } else if (result === 'takedown') {
+        this.scene.cameras.main.shake(60, 0.003); // silent: no noise
+      }
     }
   }
 
@@ -379,6 +439,7 @@ export class Player {
   }
 
   private computeState(speed: number): PlayerState {
+    if (this.attackTimer > 0) return PlayerState.Attack;
     if (this.throwTimer > 0) return PlayerState.Throw;
     if (this.aiming) return PlayerState.Aim;
     if (!this.grounded) return this.body.velocity.y < 0 ? PlayerState.Jump : PlayerState.Fall;
@@ -559,6 +620,8 @@ class PlayerDebug {
     t.add('walkNoise', 0, 10, 0.1);
     t.add('sprintNoise', 0, 15, 0.1);
     t.add('landNoise', 0, 15, 0.1);
+    t.add('combatNoise', 0, 15, 0.1);
+    t.add('attackReach', 0.3, 3, 0.05);
     t.add('strideLength', 0.3, 3, 0.05);
     t.add('squash', 0, 0.6, 0.01);
     t.add('ghostAlpha', 0, 1, 0.01);

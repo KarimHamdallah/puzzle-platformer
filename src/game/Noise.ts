@@ -6,6 +6,7 @@ export enum NoiseKind {
   Landing,
   Bottle,
   Scream,
+  Combat,
 }
 
 /** A sound: anything within `radius` px of (x, y) can hear it. */
@@ -27,9 +28,9 @@ interface Ring {
 }
 
 // Per NoiseKind: ring colour, ring duration (s), line width.
-const RING_COLOUR = [0xffffff, 0xffffff, 0xffe066, 0xff4040];
-const RING_TIME = [0.35, 0.45, 0.8, 1.1];
-const RING_WIDTH = [2, 3, 4, 5];
+const RING_COLOUR = [0xffffff, 0xffffff, 0xffe066, 0xff4040, 0xff9a40];
+const RING_TIME = [0.35, 0.45, 0.8, 1.1, 0.6];
+const RING_WIDTH = [2, 3, 4, 5, 4];
 
 /**
  * Every sound in the level, for the blind Clickers.

@@ -10,6 +10,7 @@ export enum Action {
   Jump,
   Sprint,
   Throw, // hold to aim, release to throw
+  Attack, // melee: stunned Runners, takedowns from behind
   Reset,
   Count, // number of actions, keep last
 }
@@ -32,6 +33,8 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['ShiftRight', Action.Sprint],
   ['KeyE', Action.Throw],
   ['KeyF', Action.Throw],
+  ['KeyX', Action.Attack],
+  ['KeyJ', Action.Attack],
   ['KeyR', Action.Reset],
 ]);
 

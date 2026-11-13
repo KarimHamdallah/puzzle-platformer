@@ -47,6 +47,8 @@ PALETTE = {
     'Q': (74, 116, 70),    # bottle glass
     'q': (150, 186, 128),  # bottle glass highlight
     'N': (40, 62, 40),     # bottle neck / dark glass
+    'M': (120, 122, 128),  # pipe metal
+    'm': (168, 170, 176),  # pipe highlight
 }
 
 
@@ -123,8 +125,9 @@ def solve_ik(root, target, l1, l2, bend):
 
 class Pose:
     def __init__(self, dy=0, lean=0, back_foot=(45, GROUND), front_foot=(51, GROUND),
-                 hand=(54, 64), back_hand=(43, 63), hip_dx=0, hip_dy=None, bottle=False):
+                 hand=(54, 64), back_hand=(43, 63), hip_dx=0, hip_dy=None, bottle=False, pipe=None):
         self.bottle = bottle        # draw a bottle in the front hand
+        self.pipe = pipe            # angle in degrees of a metal pipe held in the front hand (None = no pipe)
         self.dy = dy                # upper body vertical offset (bob, crouch, breathing)
         self.hip_dy = dy if hip_dy is None else hip_dy   # hips follow the body unless told otherwise
         self.lean = lean            # upper body shifts right (forward) by this many px
@@ -247,6 +250,12 @@ def draw_pose(p):
     wx, wy = draw_arm(c, (52 + ux, 49 + uy), (p.hand[0] + ux, p.hand[1] + uy), front=True)
     if p.bottle:
         draw_bottle(c, wx, wy + 1)              # held by the neck end, body above the fist
+    if p.pipe is not None:                      # pipe gripped in the fist, pointing along p.pipe degrees
+        a = math.radians(p.pipe)
+        tip = (wx + math.cos(a) * 15, wy + 1 + math.sin(a) * 15)
+        c.stroke((wx, wy + 1), tip, 2, 'M')
+        c.stroke((wx, wy + 1), tip, 1, 'm')
+        c.rect(wx - 1, wy, wx + 1, wy + 2, 'S')  # fist stays on top of the pipe
     c.outline()
     return c.image()
 
@@ -309,7 +318,22 @@ ANIMATIONS = {
               Pose(dy=1, lean=2, front_foot=(55, 90), back_foot=(43, 90), hand=(62, 46), back_hand=(44, 60)),
               Pose(dy=2, lean=3, front_foot=(55, 90), back_foot=(44, 89), hand=(61, 58), back_hand=(43, 62)),
               Pose(dy=1, lean=1, front_foot=(54, 90), back_foot=(43, 90), hand=(57, 63), back_hand=(44, 63))],
+    # Melee: pipe pulled back over the shoulder -> horizontal strike -> follow-through down -> recover.
+    'attack': [Pose(dy=0, lean=-1, front_foot=(54, 90), back_foot=(42, 90), hand=(46, 42), back_hand=(58, 56), pipe=-120),
+               Pose(dy=1, lean=3, front_foot=(56, 90), back_foot=(43, 90), hand=(61, 51), back_hand=(46, 60), pipe=-5),
+               Pose(dy=2, lean=3, front_foot=(56, 90), back_foot=(44, 89), hand=(60, 60), back_hand=(45, 62), pipe=55),
+               Pose(dy=1, lean=1, front_foot=(54, 90), back_foot=(43, 90), hand=(56, 63), back_hand=(44, 63), pipe=80)],
 }
+
+
+def draw_stash_sprite():
+    """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
+    c = Canvas()
+    draw_bottle(c, 4, 12)
+    draw_bottle(c, 12, 12)
+    draw_bottle(c, 8, 12)
+    c.outline()
+    return c.image().crop((0, 0, 17, 14))
 
 
 def draw_bottle_sprite():
@@ -332,6 +356,7 @@ def main():
         sheet.save(os.path.join(out_dir, 'player_' + name + '.png'))
         sheets[name] = sheet
     draw_bottle_sprite().save(os.path.join(out_dir, 'bottle.png'))
+    draw_stash_sprite().save(os.path.join(out_dir, 'stash.png'))
 
     if preview_dir:  # contact sheet: every animation on its own row, 3x zoom, cropped to the body
         os.makedirs(preview_dir, exist_ok=True)

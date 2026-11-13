@@ -26,6 +26,7 @@ const SHEETS: SheetAnim[] = [
   { key: 'player_sneak', path: 'assets/player/player_sneak.png', frameRate: 8, loop: true },
   { key: 'player_aim', path: 'assets/player/player_aim.png', frameRate: 3, loop: true },
   { key: 'player_throw', path: 'assets/player/player_throw.png', frameRate: 14, loop: false },
+  { key: 'player_attack', path: 'assets/player/player_attack.png', frameRate: 14, loop: false },
 
   { key: 'zombie_man_idle', path: 'assets/craftpix/zombies/zombie_man/idle.png', frameRate: 6, loop: true },
   { key: 'zombie_man_walk', path: 'assets/craftpix/zombies/zombie_man/walk.png', frameRate: 7, loop: true },
@@ -34,12 +35,17 @@ const SHEETS: SheetAnim[] = [
   { key: 'wild_zombie_idle', path: 'assets/craftpix/zombies/wild_zombie/idle.png', frameRate: 8, loop: true },
   { key: 'wild_zombie_run', path: 'assets/craftpix/zombies/wild_zombie/run.png', frameRate: 14, loop: true },
   { key: 'wild_zombie_attack', path: 'assets/craftpix/zombies/wild_zombie/attack_1.png', frameRate: 10, loop: false },
+  { key: 'wild_zombie_jump', path: 'assets/craftpix/zombies/wild_zombie/jump.png', frameRate: 10, loop: false },
+  { key: 'wild_zombie_hurt', path: 'assets/craftpix/zombies/wild_zombie/hurt.png', frameRate: 6, loop: true },
+  { key: 'wild_zombie_dead', path: 'assets/craftpix/zombies/wild_zombie/dead.png', frameRate: 10, loop: false },
+  { key: 'zombie_woman_dead', path: 'assets/craftpix/zombies/zombie_woman/dead.png', frameRate: 10, loop: false },
   { key: 'zombie_woman_idle', path: 'assets/craftpix/zombies/zombie_woman/idle.png', frameRate: 5, loop: true },
   { key: 'zombie_woman_scream', path: 'assets/craftpix/zombies/zombie_woman/scream.png', frameRate: 9, loop: true },
 ];
 
 const IMAGES: [string, string][] = [
   ['bottle', 'assets/player/bottle.png'],
+  ['stash', 'assets/player/stash.png'],
   ['bg_sky', 'assets/craftpix/bg/sky.png'],
   ['bg_far', 'assets/craftpix/bg/far.png'],
   ['bg_mid', 'assets/craftpix/bg/mid.png'],
