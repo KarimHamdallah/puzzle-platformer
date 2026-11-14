@@ -15,7 +15,8 @@ import type { Zombie } from './Zombie';
  *    after AIM_TIME -> Reload (RELOAD_TIME, the laser dims but keeps following you) -> Aim...
  *    A crate between you and him takes the bullet. Run during the reload, crate to crate.
  * Machine gunner ("no mercy"):
- *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it: you die in a blink, a
+ *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it. On you: you are pinned
+ *    where you stand (Player.pinned) while he empties GUNNER_PLAYER_TIME of fire into you; no escape. A
  *    zombie takes him GUNNER_KILL_TIME to cut down, pinned down meanwhile (it can't move or grab: run
  *    right past it). Lure an infected into his ground and run while he is busy with it.
  * Shots are flashes, a camera shake, the laser line and recorded gunshots (Sfx.ts); no bullets in flight.
@@ -59,7 +60,7 @@ const AIM_TIME = 0.7; // s with the dot on you before the shot
 const RELOAD_TIME = 1.7; // s after a shot: your window
 const GUNNER_SWEEP = 5; // tiles/s
 const GUNNER_BURST = 0.09; // s between machine-gun shots
-const GUNNER_REACTION = 0.15; // s before the first burst hits you
+const GUNNER_PLAYER_TIME = 0.9; // s he keeps firing into you (pinned, you can't move) before you fall
 const GUNNER_KILL_TIME = 2.2; // s of fire to cut down a zombie (the player's window)
 const RAY_STEP = 6; // px
 const LASER_COLOUR = 0xff2a3a;
@@ -203,8 +204,9 @@ export class Sniper {
     const p = this.player;
     if (this.state === State.Firing) {
       const t = this.target;
+      // A zombie can stumble out of his ground; you can't: once he is on you, you are pinned until you fall.
       const still = t ? t.alive && this.inZone(t.body.center.x, t.body.center.y) && this.exposed(t.body.center.x, t.body.center.y)
-        : !p.dead && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, p.body.center.y);
+        : !p.dead;
       if (!still) {
         this.state = State.Idle;
         this.target = null;
@@ -229,7 +231,8 @@ export class Sniper {
           this.state = State.Idle;
           this.target = null;
         }
-      } else if (this.timer >= GUNNER_REACTION) {
+      } else if (this.timer >= GUNNER_PLAYER_TIME) {
+        p.pinned = false;
         p.kill();
         this.state = State.Idle;
       }
@@ -256,6 +259,7 @@ export class Sniper {
   }
 
   private startFiring(target: Zombie | null): void {
+    if (!target) this.player.pinned = true; // caught in the open: frozen under the fire
     this.state = State.Firing;
     this.target = target;
     this.timer = 0;

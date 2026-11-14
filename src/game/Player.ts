@@ -112,6 +112,7 @@ export class Player {
   listening = false; // holding Listen: frozen, crouched, silent (the scene draws what he hears)
   listenEnergy = 1; // 0..1: drains while listening, recharges otherwise
   invisible = false; // cheat: nothing can see, sense or catch him
+  pinned = false; // a machine gun is on him: frozen in place, flinching, until it kills him
   listenExhausted = false; // ran dry: locked until fully recharged
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
   landCount = 0; // loud landings so far
@@ -257,7 +258,7 @@ export class Player {
     let gaitSpeed = T.walkSpeed;
     if (this.crouched) gaitSpeed = T.sneakSpeed;
     else if (this.input.held(Action.Sprint)) gaitSpeed = T.sprintSpeed;
-    const locked = this.aiming || this.throwTimer > 0 || this.attackTimer > 0 || this.listening;
+    const locked = this.aiming || this.throwTimer > 0 || this.attackTimer > 0 || this.listening || this.pinned;
     const target = locked ? 0 : this.input.moveX * gaitSpeed * TILE;
     let vx = b.velocity.x;
     let time: number;
@@ -345,7 +346,8 @@ export class Player {
     // Leg speed follows ground speed, so feet don't slide while accelerating.
     this.sprite.anims.timeScale = gait > 0 ? Phaser.Math.Clamp(speed / (gait * TILE), 0.5, 1.5) : 1;
 
-    if (this.dead) this.sprite.setTint(0xff6060);
+    if (this.pinned && !this.dead) this.sprite.setTint((Math.floor(this.simTime * 20) % 2) === 0 ? 0xffffff : 0xff6a5a); // hit, hit, hit
+    else if (this.dead) this.sprite.setTint(0xff6060);
     else if (this.hidden) this.sprite.setTint(HIDDEN_TINT);
     else this.sprite.clearTint();
     this.sprite.setAlpha(this.invisible ? 0.45 : 1);
