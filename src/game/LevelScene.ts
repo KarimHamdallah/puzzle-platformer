@@ -150,6 +150,7 @@ export class LevelScene extends Phaser.Scene {
   private revealedShown = false;
   private cheating = false; // Hard's cheat key: unlimited bottles + invisible + every door open
   private bottlesBeforeCheat = 0;
+  private smokesBeforeCheat = 0;
   private cheatText: Phaser.GameObjects.Text | null = null;
   private summoned: Zombie[] = []; // Runners called in by Screamers
   private world!: Phaser.Physics.Arcade.World;
@@ -205,6 +206,7 @@ export class LevelScene extends Phaser.Scene {
     this.hudSmoke = null;
     this.hudSmokeCount = null;
     this.revealedShown = false;
+    this.cheating = false; // a fresh level starts without cheats (the scene object is reused)
     this.dialogue = null;
     this.quest = null;
     this.groupZombies = [];
@@ -498,15 +500,18 @@ export class LevelScene extends Phaser.Scene {
       this.player.invisible = this.cheating;
       if (this.cheating) {
         this.bottlesBeforeCheat = this.throwables.count;
+        this.smokesBeforeCheat = this.throwables.smokes;
         this.locks.cheatOpenDoors();
       } else {
         this.throwables.count = this.bottlesBeforeCheat;
+        if (this.smokeQuest) this.throwables.smokes = this.smokesBeforeCheat;
         this.locks.cheatCloseDoors(this.player.body);
       }
       this.banner(this.cheating ? 'CHEATS ON' : 'CHEATS OFF', 1200);
       if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: UNLIMITED BOTTLES  INVISIBLE  DOORS OPEN' : '');
     }
     if (this.cheating && this.throwables.count < 9) this.throwables.count = 9;
+    if (this.cheating && this.smokeQuest && this.throwables.smokes < 9) this.throwables.smokes = 9; // smoke too
   }
 
   /** Back to the level select (Esc, or after finishing the level). */

@@ -135,7 +135,7 @@ export class Sniper {
 
   private rifle(dt: number): void {
     const p = this.player;
-    const inArea = !p.dead && this.playerInArea();
+    const inArea = !p.dead && !p.invisible && this.playerInArea(); // invisible (cheat): he can't find you
     switch (this.state) {
       case State.Idle:
         this.wander(dt);
@@ -275,7 +275,7 @@ export class Sniper {
         return;
       }
     }
-    if (!p.dead && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, this.headY())) this.startFiring(null);
+    if (!p.dead && !p.invisible && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, this.headY())) this.startFiring(null);
   }
 
   private startFiring(target: Zombie | null): void {

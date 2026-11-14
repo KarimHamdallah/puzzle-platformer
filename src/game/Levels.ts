@@ -64,7 +64,7 @@ export interface LevelData {
   intro: string[]; // the survivor's thoughts when the level starts (Arabic)
   introBanner: string;
   hints: [number, number, string][]; // world text: tile x, y (centre), text
-  cheats: boolean; // key 1 toggles: unlimited bottles + invisible + every door open (listed on the controls line)
+  cheats: boolean; // key 1 toggles: unlimited bottles / smoke + invisible (zombies and soldiers) + every door open
   snipers: SniperDef[]; // Mechanic 2: soldiers on towers and roofs
   breakableCrates: boolean; // big wooden crates ('W') break after CRATE_HP hits
   gunnerSeenAt: number; // tile x: walking past it the player sees the machine gun (smoke quest), 0 = none
@@ -334,7 +334,7 @@ export const LEVELS: LevelData[] = [
     intro: [],
     introBanner: '',
     hints: [],
-    cheats: false,
+    cheats: true,
     snipers: [
       { // area 1: wanders the lower path 90% of the time, the upper route 10%
         kind: SniperKind.Rifle,
@@ -367,7 +367,7 @@ export const LEVELS: LevelData[] = [
     intro: M2_MEDIUM_INTRO,
     introBanner: '',
     hints: [],
-    cheats: false,
+    cheats: true,
     snipers: [
       {
         kind: SniperKind.Rifle,
