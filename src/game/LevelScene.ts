@@ -508,7 +508,8 @@ export class LevelScene extends Phaser.Scene {
         this.locks.cheatCloseDoors(this.player.body);
       }
       this.banner(this.cheating ? 'CHEATS ON' : 'CHEATS OFF', 1200);
-      if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: UNLIMITED BOTTLES  INVISIBLE  DOORS OPEN' : '');
+      const unlimited = this.smokeQuest ? 'UNLIMITED BOTTLES + SMOKE' : 'UNLIMITED BOTTLES';
+      if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: ' + unlimited + '  INVISIBLE  DOORS OPEN' : '');
     }
     if (this.cheating && this.throwables.count < 9) this.throwables.count = 9;
     if (this.cheating && this.smokeQuest && this.throwables.smokes < 9) this.throwables.smokes = 9; // smoke too
@@ -595,7 +596,7 @@ export class LevelScene extends Phaser.Scene {
     this.add.text(24, this.scale.height - 20,
       'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Read / look ↑'
       + (this.player.canListen ? '   Listen Q (hold)' : '') + '   Checkpoint R   Levels Esc'
-      + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles + invisible + every door open' : ''), {
+      + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles' + (this.smokeQuest ? ' / smoke' : '') + ' + invisible + every door open' : ''), {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }
