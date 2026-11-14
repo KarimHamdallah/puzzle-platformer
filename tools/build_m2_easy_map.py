@@ -15,7 +15,7 @@ in the margin says how to survive.
      tower leads on (he can't see under himself).
   area 2, the machine gun (x 69..123): a gunner on a roof watches an open stretch (x 90..98) and kills
      anything exposed in it. A Clicker stands in the low passage before it. Throw a bottle into the
-     open ground: the Clicker walks in, the gun turns on it for ~2 s, you run across under the roof.
+     open ground: the Clicker walks in, the gun turns on it for ~2.7 s, you run across under the roof.
 
 Legend (on top of the others): W = big crate (cover), A = tent (decor), F = campfire (decor),
 J = the dead soldier with his newspaper, Z = wooden scaffolding (walkable; snipers see and shoot
