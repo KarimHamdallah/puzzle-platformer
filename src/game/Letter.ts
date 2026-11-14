@@ -142,7 +142,8 @@ export class Letter {
     if (this.open) {
       if (this.input.pressed(Action.Left)) this.turn(1);
       else if (this.input.pressed(Action.Right)) this.turn(-1);
-      else if (this.input.pressed(Action.Up) || this.input.pressed(Action.Jump) || this.input.pressed(Action.Attack)) this.close();
+      else if (this.input.pressed(Action.Up) || this.input.pressed(Action.Jump) || this.input.pressed(Action.Attack)
+        || this.input.pressed(Action.Back)) this.close();
       return;
     }
 

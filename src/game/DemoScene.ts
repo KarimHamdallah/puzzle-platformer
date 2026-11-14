@@ -221,8 +221,13 @@ export class DemoScene extends Phaser.Scene {
   update(time: number, deltaMs: number): void {
     this.controls.update();
     if (this.letter) {
+      const reading = this.letter.open;
       this.letter.update(time, this.player);
-      if (this.letter.open) return; // reading: the world is paused (Letter pauses physics)
+      if (reading || this.letter.open) return; // reading: the world is paused (Letter pauses physics)
+    }
+    if (this.controls.pressed(Action.Back)) {
+      this.toMenu();
+      return;
     }
     if (this.controls.pressed(Action.Reset)) this.restartLevel();
 
@@ -335,20 +340,26 @@ export class DemoScene extends Phaser.Scene {
     if (this.exit && Math.abs(p.feetX - this.exit.x) < TILE * 0.6 && Math.abs(p.feetY - this.exit.y) < TILE * 2) {
       this.finished = true;
       this.banner('YOU MADE IT', 2500);
-      this.time.delayedCall(2600, () => this.restartLevel(true));
+      this.time.delayedCall(2600, () => this.toMenu());
     }
   }
 
-  /**
-   * Reliable reset: zombies, stashes and bottles go back to their state at the last checkpoint
-   * (or the level start). fromStart = full restart (after finishing the level).
-   */
-  private restartLevel(fromStart: boolean = false): void {
+  /** Reliable reset: zombies, stashes and bottles go back to their state at the last checkpoint (or the level start). */
+  private restartLevel(): void {
     if (this.restarting) return;
     this.restarting = true;
-    const data: RestartData = fromStart ? { checkpoint: -1, bottles: 0 } : { checkpoint: this.checkpoint, bottles: this.bottlesAtCheckpoint };
+    const data: RestartData = { checkpoint: this.checkpoint, bottles: this.bottlesAtCheckpoint };
     this.cameras.main.fadeOut(180, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.restart(data));
+  }
+
+  /** Back to the level select (Esc, or after finishing the level). */
+  private toMenu(): void {
+    if (this.restarting) return;
+    this.restarting = true;
+    this.physics.resume(); // in case the letter paused it
+    this.cameras.main.fadeOut(180, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start('Menu'));
   }
 
   private banner(text: string, ms: number): void {
@@ -398,7 +409,7 @@ export class DemoScene extends Phaser.Scene {
       fontFamily: 'Georgia, serif', fontSize: '40px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 6,
     }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(50);
     this.add.text(24, this.scale.height - 20,
-      'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Checkpoint R', {
+      'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Checkpoint R   Levels Esc', {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }

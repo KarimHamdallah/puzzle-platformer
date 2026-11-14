@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import './style.css';
 import { debug } from './core/Debug';
 import { DemoScene } from './game/DemoScene';
+import { MenuScene } from './game/MenuScene';
+import { PlaygroundScene } from './game/PlaygroundScene';
 
 // Render at 1920x1080, scaled to fit the window. Pixel-art textures switch themselves to
 // nearest-neighbour filtering (Assets.ts); antialiasing stays on for debug drawing.
@@ -25,7 +27,7 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [DemoScene],
+  scene: [MenuScene, PlaygroundScene, DemoScene], // the first one starts: the level select
 };
 
 const game = new Phaser.Game(config);

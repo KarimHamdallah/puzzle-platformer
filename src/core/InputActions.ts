@@ -7,11 +7,12 @@ export enum Action {
   Right,
   Up, // aim: raise the throw arc
   Down, // ground: crouch / sneak. air: fast fall. aim: lower the arc
-  Jump,
+  Jump, // also confirms in menus
   Sprint,
   Throw, // hold to aim, release to throw
   Attack, // melee: stunned Runners, takedowns from behind
   Reset,
+  Back, // leave the level for the level select
   Count, // number of actions, keep last
 }
 
@@ -29,6 +30,8 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['Space', Action.Jump],
   ['KeyZ', Action.Jump],
   ['KeyK', Action.Jump],
+  ['Enter', Action.Jump],
+  ['NumpadEnter', Action.Jump],
   ['ShiftLeft', Action.Sprint],
   ['ShiftRight', Action.Sprint],
   ['KeyE', Action.Throw],
@@ -36,6 +39,7 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['KeyX', Action.Attack],
   ['KeyJ', Action.Attack],
   ['KeyR', Action.Reset],
+  ['Escape', Action.Back],
 ]);
 
 class ActionState {
