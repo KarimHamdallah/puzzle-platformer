@@ -2,7 +2,13 @@ import Phaser from 'phaser';
 import type GUI from 'lil-gui';
 import { DEBUG_ENABLED, TuningFolder, debug } from '../core/Debug';
 import { TILE } from './constants';
-import type { Player } from './Player';
+
+/** What the camera follows: the survivor, or the Day 1 cube. */
+export interface CameraTarget {
+  readonly feetX: number;
+  readonly feetY: number;
+  readonly body: Phaser.Physics.Arcade.Body;
+}
 
 /**
  * Cinemachine "Framing Transposer" style settings. Zones are FRACTIONS OF THE SCREEN (0..1).
@@ -54,7 +60,7 @@ function followAxis(delta: number, deadHalf: number, softHalf: number, damping: 
 
 export class CameraRig {
   private readonly cam: Phaser.Cameras.Scene2D.Camera;
-  private readonly player: Player;
+  private readonly player: CameraTarget;
   private readonly worldW: number;
   private readonly worldH: number;
   private x = 0; // camera centre we steer (world px)
@@ -64,7 +70,7 @@ export class CameraRig {
   private targetY = 0;
   private debugView: CameraDebug | null = null;
 
-  constructor(scene: Phaser.Scene, player: Player, worldW: number, worldH: number) {
+  constructor(scene: Phaser.Scene, player: CameraTarget, worldW: number, worldH: number) {
     this.cam = scene.cameras.main;
     this.player = player;
     this.worldW = worldW;

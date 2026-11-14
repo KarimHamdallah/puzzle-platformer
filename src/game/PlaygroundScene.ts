@@ -1,12 +1,14 @@
 import Phaser from 'phaser';
 import { DEBUG_ENABLED, TuningFolder } from '../core/Debug';
 import { Action, InputActions } from '../core/InputActions';
+import { CameraRig } from './CameraRig';
 import { TILE } from './constants';
 
 // ---------------------------------------------------------------- Day 1, as it was
 // The very first movement test (commit aa7980a): the greybox room and the white cube with eyes, with
-// its own controller, tuning and camera follow, ported unchanged in behaviour. The survivor's
-// controller grew out of this one later; this level keeps the original to compare against.
+// its own controller and tuning, ported unchanged in behaviour. The survivor's controller grew out of
+// this one later; this level keeps the original to compare against. The camera is today's dead-zone
+// rig: Day 1's plain smoothed follow chased every step and made the cube jitter.
 
 interface Solid {
   x: number;
@@ -258,6 +260,7 @@ class Cube {
 export class PlaygroundScene extends Phaser.Scene {
   private controls!: InputActions;
   private cube!: Cube;
+  private cameraRig!: CameraRig;
   private tuning: TuningFolder<CubeTuning> | null = null;
   private world!: Phaser.Physics.Arcade.World;
 
@@ -284,9 +287,7 @@ export class PlaygroundScene extends Phaser.Scene {
     this.cube = new Cube(this, this.controls, SPAWN_X * TILE, SPAWN_Y * TILE);
     this.physics.add.collider(this.cube.body, solids);
 
-    // Day 1 camera: plain smoothed follow, before the dead-zone rig existed.
-    cam.setBounds(0, 0, worldW, worldH);
-    cam.startFollow(this.cube.view, false, 0.12, 0.12, 0, TILE);
+    this.cameraRig = new CameraRig(this, this.cube, worldW, worldH); // dead zone: small moves don't move the camera
 
     if (DEBUG_ENABLED) {
       const t = new TuningFolder('cube tuning', T);
@@ -330,8 +331,12 @@ export class PlaygroundScene extends Phaser.Scene {
       this.scene.start('Menu');
       return;
     }
-    if (this.controls.pressed(Action.Reset)) this.cube.respawn();
+    if (this.controls.pressed(Action.Reset)) {
+      this.cube.respawn();
+      this.cameraRig.snap();
+    }
     this.cube.update(deltaMs);
+    this.cameraRig.update(deltaMs);
   }
 
   private fixedUpdate(dt: number): void {
@@ -342,6 +347,7 @@ export class PlaygroundScene extends Phaser.Scene {
   private shutdown(): void {
     this.world.off(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
     if (this.tuning) this.tuning.destroy();
+    this.cameraRig.destroy();
     this.controls.destroy();
   }
 }
