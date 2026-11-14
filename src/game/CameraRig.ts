@@ -22,16 +22,16 @@ export interface CameraTarget {
  *   +-------------------------------+
  */
 class CameraTuning {
-  screenX = 0.34; // where the target sits on screen (0 = left, 1 = right): left third = more view ahead
+  screenX = 0.5; // where the target sits on screen (0 = left, 1 = right)
   screenY = 0.5; // (0 = top, 1 = bottom)
-  deadZoneWidth = 0.37;
-  deadZoneHeight = 0.78; // must stay > ~0.4 so a full jump from rest never moves the camera
-  softZoneWidth = 0.5;
-  softZoneHeight = 0.75; // smaller than deadZoneHeight -> treated as equal: no vertical soft zone
-  dampingX = 0.25; // s to catch up inside the soft zone (0 = instant)
-  dampingY = 0.35;
-  targetOffsetX = 0; // tiles from the player's feet to the tracked point
-  targetOffsetY = -1;
+  deadZoneWidth = 0.3;
+  deadZoneHeight = 0.06; // thin: the camera follows height changes, through the vertical soft zone
+  softZoneWidth = 0.95;
+  softZoneHeight = 0.83;
+  dampingX = 0; // s to catch up inside the soft zone (0 = instant)
+  dampingY = 0.35; // jumps lift the camera smoothly, not instantly
+  targetOffsetX = -0.4; // tiles from the player's feet to the tracked point
+  targetOffsetY = -2.3; // above the head: more room to see what's below / ahead
   lookAheadTime = 0.5; // s: tracked point is pushed ahead by velocity * this
   lookAheadSmoothing = 0.4; // s: how smoothly the look-ahead changes (turning around)
 }

@@ -82,7 +82,7 @@ const SIGNS: Sign[] = [
   { x: 29.4, y: 13.2, title: 'VARIABLE JUMP HEIGHT',
     text: 'Tap = short hop (1.8 tiles). Hold = full jump (3.2 tiles). This pillar is 3 tiles tall: only a held jump clears it.' },
   { x: 43, y: 2.2, title: 'CAMERA DEAD ZONE',
-    text: 'Small moves and hops leave the camera still: no jitter. Move far enough and it follows smoothly, looking ahead of you.' },
+    text: 'Small moves sideways leave the camera still: no jitter. Move far enough and it follows, looking ahead of you; jumps lift it smoothly.' },
 ];
 const SIGN_WIDTH = 7.4; // tiles
 
