@@ -70,26 +70,27 @@ put(89, 25, 'K')
 # ---- C: three-floor building (x 90..130), every floor 3 tiles high ------------------------
 # Sound travels between floors (they're only 3 tiles apart). One Clicker per floor, crates on every
 # floor, no room to jump over anyone.
-put(92, 25, 'x')
+# STAIRWELL on the building's LEFT, under open sky (the side you arrive from). Under a 3-tile ceiling a
+# jump only lifts the feet 1.2 tiles, so every big climb happens here, never inside a floor:
+#   ground (26) -> step (24): 2-tile jump        step -> landing 1 (22): 2-tile jump
+#   landing 1 is floor 2 itself, extended out under the sky: walk right onto floor 2, no jump
+#   floor 2 at x 93 (no ceiling) -> landing 2 (19): 3-tile jump, drift left
+#   landing 2 -> floor 3 (18): hop right across a 1-tile gap (2 tiles was too tight for a walking jump)
+# (First version stacked landing 2 three tiles above landing 1: the jump between landing 1 and floor 2
+#  was capped at 1.2 tiles and the feet cleared the edge too briefly to get on. Found by playtesting.)
+fill(87, 24, 88, 24)            # step
+fill(90, 22, 129, 22)           # floor 2 slab (x 90..92 = landing 1); ground floor interior rows 23..25
+fill(90, 19, 92, 19)            # landing 2
+put(91, 18, 'x')                # stash on landing 2
+fill(130, 19, 130, 22)          # building right wall above the ground floor (the street door stays open)
 put(99, 25, 'B')
 put(105, 25, 'c')               # ground-floor Clicker (patrols)
 put(118, 25, 'B')
-# Step up to floor 2 at the right end, directly against floor 2's edge (no horizontal gap to cross).
-# Columns 125..129 to its right have no low ceiling: you jump up-left onto the step from there
-# (under floor 2 the 3-tile ceiling would cap the jump at 1.2 tiles), then from the step onto floor 2.
-fill(122, 24, 124, 24)
-fill(93, 22, 121, 22)           # floor 2 slab: ground floor interior rows 23..25
-fill(130, 19, 130, 22)          # building right wall above the ground floor (the street door stays open)
 put(101, 21, 'B')
 put(110, 21, 'c')               # floor-2 Clicker (patrols)
 put(118, 21, 'B')
-# Step up to floor 3 at the left end, ONE tile above floor 2: under a 3-tile ceiling the feet can only
-# rise 1.2 tiles, so the step must be reachable by a small hop; above it is open sky, so from the step
-# a full jump reaches floor 3 (3 tiles up).
-fill(92, 21, 94, 21)
-put(93, 20, 'x')                # stash on the step
-fill(95, 18, 129, 18)           # floor 3 slab: floor 2 interior rows 19..21
-fill(95, 14, 130, 14)           # building roof: floor 3 interior rows 15..17 (covers the door too)
+fill(94, 18, 129, 18)           # floor 3 slab (starts at 94: floor 2 keeps x 93 open to the sky)
+fill(94, 14, 130, 14)           # building roof: floor 3 interior rows 15..17 (covers the door too)
 put(106, 17, 'B')
 put(112, 17, 'C')               # floor-3 Clicker at its post, facing left; carries key 3
 put(121, 17, 'B')
