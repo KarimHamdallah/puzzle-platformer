@@ -56,6 +56,37 @@ export const SOLIDS: Solid[] = [
 ];
 
 /**
+ * Signs in the room: what was built on Day 1, each one placed next to the piece of the room that
+ * shows it. x / y = top-left in tiles.
+ */
+interface Sign {
+  x: number;
+  y: number;
+  title: string;
+  text: string;
+}
+
+const SIGNS: Sign[] = [
+  { x: 1.6, y: 2.2, title: 'MOVEMENT FEEL',
+    text: '0.08 s to full speed, 0.06 s to stop, 0.05 s to turn around. Softer control in the air.' },
+  { x: 1.6, y: 6.6, title: 'JUMP BUFFER',
+    text: 'Press jump up to 0.12 s before you land: the jump still happens.' },
+  { x: 1.6, y: 10.6, title: 'SQUASH & STRETCH  +  TAKEOFF GHOST',
+    text: 'Stretch on takeoff, squash on landing. A dark ghost marks where your last jump started.' },
+  { x: 13.6, y: 16.4, title: 'COYOTE TIME  →',
+    text: 'Walk off this edge: you can still jump for 0.1 s.' },
+  { x: 21.4, y: 13.2, title: 'FAST FALL',
+    text: 'Hold ↓ in the air: fall faster.' },
+  { x: 30.4, y: 2.2, title: 'APEX HANG  +  HEAVY FALL',
+    text: 'Hold jump at the top: gravity halves for a little hang time. Falling is 1.7x faster: snappy, not floaty.' },
+  { x: 29.4, y: 13.2, title: 'VARIABLE JUMP HEIGHT',
+    text: 'Tap = short hop (1.8 tiles). Hold = full jump (3.2 tiles). This pillar is 3 tiles tall: only a held jump clears it.' },
+  { x: 43, y: 2.2, title: 'CAMERA DEAD ZONE',
+    text: 'Small moves and hops leave the camera still: no jitter. Move far enough and it follows smoothly, looking ahead of you.' },
+];
+const SIGN_WIDTH = 7.4; // tiles
+
+/**
  * Every movement number, in TILES and SECONDS (never pixels).
  * Gravity and jump speed are derived from jumpHeight + timeToApex, so designers tune what they feel.
  */
@@ -313,9 +344,11 @@ export class PlaygroundScene extends Phaser.Scene {
       this.tuning = t;
     }
 
-    this.add.text(24, 20, 'DAY 1  -  MOVEMENT TEST ROOM', {
+    for (let i = 0; i < SIGNS.length; i++) this.addSign(SIGNS[i]);
+
+    this.add.text(1.6 * TILE, 1.2 * TILE, 'DAY 1  -  MOVEMENT TEST ROOM', { // in the room, above the first sign
       fontFamily: 'Georgia, serif', fontSize: '34px', fontStyle: 'bold', color: '#ffffff', stroke: '#1d3a2a', strokeThickness: 6,
-    }).setScrollFactor(0).setDepth(50);
+    }).setDepth(2);
     this.add.text(24, this.scale.height - 20, 'Move ←→   Jump Space (hold = higher)   Fast fall ↓   Respawn R   Level select Esc', {
       fontFamily: 'Georgia, serif', fontSize: '22px', color: '#ffffff', stroke: '#1d3a2a', strokeThickness: 4,
     }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
@@ -341,6 +374,21 @@ export class PlaygroundScene extends Phaser.Scene {
 
   private fixedUpdate(dt: number): void {
     this.cube.fixedUpdate(dt);
+  }
+
+  /** A title line and a wrapped description, on a faint dark plate so it reads over the green. */
+  private addSign(sign: Sign): void {
+    const x = sign.x * TILE;
+    const y = sign.y * TILE;
+    const title = this.add.text(x + 16, y + 12, sign.title, {
+      fontFamily: 'Georgia, serif', fontSize: '26px', fontStyle: 'bold', color: '#ffffff',
+    }).setDepth(2);
+    const w = Math.max(SIGN_WIDTH * TILE, title.width + 32); // long titles widen the plate
+    const body = this.add.text(x + 16, y + 12 + title.height + 4, sign.text, {
+      fontFamily: 'Georgia, serif', fontSize: '21px', color: '#e8f5ec', wordWrap: { width: w - 32 }, lineSpacing: 4,
+    }).setDepth(2);
+    const h = title.height + body.height + 30;
+    this.add.rectangle(x, y, w, h, 0x1d3a2a, 0.45).setOrigin(0, 0).setDepth(1);
   }
 
   /** Our "destructor". Uses this.world: scene.physics.world is already null when SHUTDOWN fires. */
