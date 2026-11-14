@@ -135,6 +135,7 @@ export class Zombie {
   private fire: Phaser.GameObjects.Sprite | null = null; // while burning
   private burnDelay = 0; // s before the flames reach it
   private burnTime = 0;
+  private suppressed = 0; // s left pinned down by machine-gun fire: frozen, flinching, harmless
   private readonly sprite: Phaser.GameObjects.Sprite;
   private readonly icon: Phaser.GameObjects.Text;
   private readonly fx: Phaser.GameObjects.Graphics; // dizzy stars
@@ -211,7 +212,8 @@ export class Zombie {
 
   /** Can catch the player right now. */
   get dangerous(): boolean {
-    return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Grab && this.state !== ZombieState.Burning;
+    return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Grab && this.state !== ZombieState.Burning
+      && this.suppressed <= 0;
   }
 
   /** Real overlap with the player's body (a few px of grace on every side). */
@@ -279,6 +281,11 @@ export class Zombie {
       if (this.onGround()) b.setVelocityX(0);
       return;
     }
+    if (this.suppressed > 0) { // under fire: it can't move, hear or grab anyone; you can run past it
+      this.suppressed -= dt;
+      b.setVelocityX(0);
+      return;
+    }
     if (this.state === ZombieState.Burning) {
       b.setVelocityX(0);
       if (this.burnDelay > 0) { // the fire is still spreading toward it
@@ -341,6 +348,8 @@ export class Zombie {
 
     let anim = this.info.idle;
     const moving = Math.abs(this.body.velocity.x) > 1;
+    if (this.suppressed > 0 && this.alive) this.sprite.setTint((Math.floor(timeMs / 50) % 2) === 0 ? 0xffffff : 0xffb0a0);
+    else if (this.alive && this.state !== ZombieState.Burning) this.sprite.clearTint();
     switch (this.state) {
       case ZombieState.Dead: anim = this.info.dead; break;
       case ZombieState.Burning: anim = this.fire ? this.info.hurt : this.feeding ? FEED_ANIM : this.info.idle; break;
@@ -667,6 +676,11 @@ export class Zombie {
   }
 
   /** Cut down by a soldier's gun (Mechanic 2): soldiers shoot anything that moves. */
+  /** A machine gun is on it: pinned down for a moment (called on every burst). */
+  suppress(): void {
+    this.suppressed = 0.25;
+  }
+
   shot(): void {
     if (this.alive) this.die();
   }

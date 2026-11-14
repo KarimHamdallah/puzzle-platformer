@@ -1,21 +1,24 @@
 import Phaser from 'phaser';
 import { ART_SCALE, TILE } from './constants';
 import type { Player } from './Player';
+import { boltAction, gunBurst, rifleShot } from './Sfx';
 import type { Zombie } from './Zombie';
 
 /**
  * Mechanic 2: snipers on towers. The army shoots anything that moves: people or infected.
  *
  * Rifle sniper ("wait, then cross"):
- *  - Idle: his red laser wanders between random points of weighted zones (e.g. 90% the lower path, 10%
- *    the upper route). If the laser touches you while you are in the open, he has you.
- *  - From then on he never lets go: Aim (the laser locks on you, AIM_TIME) -> Fire -> Reload (the laser
- *    goes dark, RELOAD_TIME) -> Aim... A crate between you and him takes the bullet. Move during reloads.
+ *  - Outside his area his red laser wanders between random points of weighted zones (e.g. 90% the
+ *    lower path, 10% the upper route): you can watch it from safety.
+ *  - The moment you step into his area he has you, and never lets go. The laser CHASES you, faster
+ *    than you sprint (CHASE_SPEED). Once the dot is on you (or on the crate in front of you) he fires
+ *    after AIM_TIME -> Reload (RELOAD_TIME, the laser dims but keeps following you) -> Aim...
+ *    A crate between you and him takes the bullet. Run during the reload, crate to crate.
  * Machine gunner ("no mercy"):
  *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it: you die in a blink, a
- *    zombie takes him GUNNER_KILL_TIME to cut down. Lure an infected into his ground and run while he
- *    is busy with it.
- * Shots are flashes, a camera shake and the laser line; no bullets in flight.
+ *    zombie takes him GUNNER_KILL_TIME to cut down, pinned down meanwhile (it can't move or grab: run
+ *    right past it). Lure an infected into his ground and run while he is busy with it.
+ * Shots are flashes, a camera shake, the laser line and synthesised sound (Sfx.ts); no bullets in flight.
  */
 
 export enum SniperKind {
@@ -41,18 +44,19 @@ export interface SniperDef {
 
 enum State {
   Idle, // rifle: wandering laser / gunner: sweeping
-  Aim, // rifle: locked on, about to fire
-  Reload, // rifle: laser dark
+  Aim, // rifle: chasing you, fires once the dot has been on you for AIM_TIME
+  Reload, // rifle: laser dim, still following you
   Firing, // gunner: bursts at a target
 }
 
 const SWEEP_SPEED = 7; // tiles/s the laser wanders
 const DWELL_MIN = 0.35; // s the laser rests on a point
 const DWELL_MAX = 0.9;
-const SPOT_LINE = 0.5; // tiles: the laser line passing this close to you (in the open) = spotted
-const SPOT_DOT = 0.9; // tiles: the laser dot this close to you = spotted
-const AIM_TIME = 1.1; // s locked on before the shot
-const RELOAD_TIME = 2.2; // s of darkness after a shot: your window
+const CHASE_SPEED = 11; // tiles/s the laser chases you (you sprint at 8.5)
+const RELOAD_CHASE = 7; // tiles/s it keeps following you while he reloads
+const LOCK_RADIUS = 0.7; // tiles: the dot this close to its target counts as "on you"
+const AIM_TIME = 0.7; // s with the dot on you before the shot
+const RELOAD_TIME = 1.4; // s after a shot: your window
 const GUNNER_SWEEP = 5; // tiles/s
 const GUNNER_BURST = 0.09; // s between machine-gun shots
 const GUNNER_REACTION = 0.15; // s before the first burst hits you
@@ -122,14 +126,23 @@ export class Sniper {
     switch (this.state) {
       case State.Idle:
         this.wander(dt);
-        if (inArea && this.spots()) this.startAim();
+        if (inArea) this.startAim(); // step into his area and he has you
         break;
-      case State.Aim:
-        this.track(dt, p.body.center.x, p.body.center.y, 16);
-        this.timer -= dt;
+      case State.Aim: {
+        if (!inArea) { // got out (under the tower, past it): back to wandering
+          this.state = State.Idle;
+          this.pickGoal();
+          break;
+        }
+        const tx = p.body.center.x;
+        const ty = p.body.center.y;
+        this.track(dt, tx, ty, CHASE_SPEED);
+        if (Phaser.Math.Distance.Between(this.laserX, this.laserY, tx, ty) < LOCK_RADIUS * TILE) this.timer -= dt;
         if (this.timer <= 0) this.fireRifle();
         break;
+      }
       case State.Reload:
+        if (!p.dead) this.track(dt, p.body.center.x, p.body.center.y, RELOAD_CHASE);
         this.timer -= dt;
         if (this.timer <= 0) {
           if (inArea) this.startAim(); // once he has you, he keeps going
@@ -148,6 +161,8 @@ export class Sniper {
     const p = this.player;
     const hit = this.ray(this.muzzleX, this.muzzleY, p.body.center.x, p.body.center.y);
     this.shotEffects(hit.x, hit.y, 0.008, 180);
+    rifleShot(this.scene);
+    boltAction(this.scene, RELOAD_TIME * 0.35); // you hear him reload: your window
     if (!hit.blocked && !p.dead) p.kill(); // in the open: one shot
     this.state = State.Reload;
     this.timer = RELOAD_TIME;
@@ -181,18 +196,6 @@ export class Sniper {
     this.goalY = (z.y0 + Math.random() * (z.y1 - z.y0)) * TILE;
   }
 
-  /** The laser touched you while you were in the open. */
-  private spots(): boolean {
-    const p = this.player;
-    const cx = p.body.center.x;
-    const cy = p.body.center.y;
-    if (this.ray(this.muzzleX, this.muzzleY, cx, cy).blocked) return false; // behind cover
-    const end = this.laserEnd();
-    if (Phaser.Math.Distance.Between(end.x, end.y, cx, cy) < SPOT_DOT * TILE) return true;
-    const line = new Phaser.Geom.Line(this.muzzleX, this.muzzleY, end.x, end.y);
-    return distanceToSegment(line, cx, cy) < SPOT_LINE * TILE;
-  }
-
   // ---------------------------------------------------------------- gunner
 
   private gunner(dt: number): void {
@@ -215,8 +218,10 @@ export class Sniper {
       if (this.burst <= 0) {
         this.burst = GUNNER_BURST;
         this.shotEffects(tx + (Math.random() - 0.5) * 20, ty + (Math.random() - 0.5) * 30, 0.003, 70);
+        gunBurst(this.scene);
       }
       if (t) {
+        t.suppress(); // pinned down: it can't move, hear or grab while he shoots it
         const took = (this.hits.get(t) ?? 0) + dt;
         this.hits.set(t, took);
         if (took >= GUNNER_KILL_TIME) {
@@ -335,26 +340,16 @@ export class Sniper {
       g.fillStyle(0xffffff, 0.9).fillCircle(this.impactX, this.impactY, 12);
       g.fillStyle(0xffd060, 0.45).fillCircle(this.impactX, this.impactY, 28);
     }
-    if (this.state === State.Reload) return; // reloading: no laser
+    const reloading = this.state === State.Reload;
     const hot = this.state === State.Aim || this.state === State.Firing;
     // Wandering: the beam runs on until something solid takes it. Locked on: it stops on the target
     // (the dot sits on you), or on the cover in front of you.
-    const end = hot ? this.ray(this.muzzleX, this.muzzleY, this.laserX, this.laserY) : this.laserEnd();
-    const pulse = hot ? 0.75 + Math.sin(timeMs / 45) * 0.25 : 1;
+    const end = hot || reloading ? this.ray(this.muzzleX, this.muzzleY, this.laserX, this.laserY) : this.laserEnd();
+    const pulse = reloading ? 0.35 : hot ? 0.75 + Math.sin(timeMs / 45) * 0.25 : 1; // reloading: dim, still on you
     g.lineStyle(hot ? 10 : 7, LASER_COLOUR, 0.12 * pulse).lineBetween(this.muzzleX, this.muzzleY, end.x, end.y);
     g.lineStyle(hot ? 4 : 3, LASER_COLOUR, 0.35 * pulse).lineBetween(this.muzzleX, this.muzzleY, end.x, end.y);
     g.lineStyle(hot ? 2 : 1.5, 0xff7080, 0.95).lineBetween(this.muzzleX, this.muzzleY, end.x, end.y);
     g.fillStyle(LASER_COLOUR, 0.35).fillCircle(end.x, end.y, hot ? 12 : 9);
     g.fillStyle(0xffb0b8, 1).fillCircle(end.x, end.y, hot ? 4 : 3);
   }
-}
-
-function distanceToSegment(line: Phaser.Geom.Line, x: number, y: number): number {
-  const p = Phaser.Geom.Line.GetNearestPoint(line, new Phaser.Geom.Point(x, y));
-  const minX = Math.min(line.x1, line.x2);
-  const maxX = Math.max(line.x1, line.x2);
-  const t = Phaser.Math.Clamp(p.x, minX, maxX); // GetNearestPoint works on the infinite line: clamp to the segment
-  const ty = line.x2 === line.x1 ? Phaser.Math.Clamp(p.y, Math.min(line.y1, line.y2), Math.max(line.y1, line.y2))
-    : line.y1 + (line.y2 - line.y1) * ((t - line.x1) / (line.x2 - line.x1));
-  return Phaser.Math.Distance.Between(t, ty, x, y);
 }

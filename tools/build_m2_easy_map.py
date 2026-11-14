@@ -8,10 +8,11 @@ in the margin says how to survive.
 
   camp (x 1..13): safe. Tent, campfire, the dead soldier + newspaper ('J'). From here you can watch the
      laser wander before you step out.
-  area 1, the tower (x 14..68): a rifle sniper on a tower at the right end. His laser wanders the
-     lower path 90% of the time, the upper route (wooden scaffolding) 10%. Big crates on the lower path.
-     If the laser touches you in the open he never lets go: aim, shoot, reload; move during reloads,
-     crate to crate. A doorway under the tower leads on (he can't see under himself).
+  area 1, the tower (x 14..68): a rifle sniper on a tower at the right end. Step into his area and he
+     has you: his laser chases you faster than you run, he fires 0.7 s after the dot reaches you, then
+     reloads for 1.4 s. Big crates every 7 tiles take his bullets: let him hit the crate, run while he
+     reloads. Outside his area the laser wanders (lower path 90%, scaffolding 10%). A doorway under the
+     tower leads on (he can't see under himself).
   area 2, the machine gun (x 69..123): a gunner on a roof watches an open stretch (x 90..98) and kills
      anything exposed in it. A Clicker stands in the low passage before it. Throw a bottle into the
      open ground: the Clicker walks in, the gun turns on it for ~2 s, you run across under the roof.
