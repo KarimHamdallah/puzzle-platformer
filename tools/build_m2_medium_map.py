@@ -7,14 +7,14 @@ TypeScript array to paste into src/game/Levels.ts (M2_MEDIUM_MAP).
   area 2, the machine gun (x 69..123): open ground and nothing to draw his fire. Seeing it (x 84), the
      player remembers an army ammo crate under the tower.
   The smoke grenades are on a scaffold ledge under the tower (Y), reachable only from the scaffolding
-  route: from the start of area 1, or, once the gun has been seen, from the rubble halfway. So area 1
+  route: from the start of area 1, or, once the gun has been seen, from the platforms halfway. So area 1
   is crossed THREE times:
      1. forward on the lower path (each crate he hits is cracked),
      2. back on the lower path (the cracked crates break: concrete and the crates you saved matter),
-     3. up the RUBBLE: once the gun has been seen, a wall section has collapsed halfway through area 1
-        (LevelData.rubble, x 32..34): 2-tile stone steps up onto the scaffolding. Forward on the
-        scaffolding (fresh crates on every segment) to the ledge, down to the tower doorway, on to
-        area 2, where a smoke cloud blinds the gunner.
+     3. up the wooden scaffold staircase that is there once the gun has been seen (LevelData.revealed,
+        x 39..44, rises of 2 / 1 / 2 going up to the left, i.e. coming back), onto the scaffolding. Forward on the scaffolding
+        (fresh crates on every segment) to the ledge, down to the tower doorway, on to area 2, where
+        a smoke cloud blinds the gunner.
   Broken and cracked crates stay that way, even after a death; the stolen smoke and what you've seen
   are kept too.
 
@@ -50,7 +50,7 @@ put(3, 25, 'P')
 fill(15, 24, 16, 25)              # steps up to the scaffolding (2, then 4 high)
 fill(17, 22, 19, 25)
 # lower path: breakable crates, two concrete blocks (the only cover that lasts all three passes)
-for x in (23, 35, 41, 53, 58):
+for x in (23, 36, 53, 58):         # (not next to the steps that appear at 39..44: crates aren't climbable)
     put(x, 25, 'W')
 put(29, 25, 'Q')
 put(47, 25, 'Q')

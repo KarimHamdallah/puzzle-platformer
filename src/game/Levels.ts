@@ -68,7 +68,7 @@ export interface LevelData {
   snipers: SniperDef[]; // Mechanic 2: soldiers on towers and roofs
   breakableCrates: boolean; // big wooden crates ('W') break after CRATE_HP hits
   gunnerSeenAt: number; // tile x: walking past it the player sees the machine gun (smoke quest), 0 = none
-  rubble: [number, number][]; // stone tiles that appear once the machine gun has been seen (a wall collapsed)
+  revealed: [number, number][]; // scaffolding tiles that appear once the machine gun has been seen
 }
 
 const HARD_INTRO = [
@@ -248,7 +248,7 @@ const M2_MEDIUM_MAP: string[] = [
   '#................###...........................................######..........###########.........#######################.#',
   '#................###.......................................................................................................#',
   '#..............#####.......................................................................................................#',
-  '#..P...........#####...W.....Q.....W.....W.....Q.....W....W............K...............................................E...#',
+  '#..P...........#####...W.....Q......W..........Q.....W....W............K...............................................E...#',
   '############################################################################################################################',
   '############################################################################################################################',
   '############################################################################################################################',
@@ -279,7 +279,7 @@ export const LEVELS: LevelData[] = [
     snipers: [],
     breakableCrates: false,
     gunnerSeenAt: 0,
-    rubble: [],
+    revealed: [],
   },
   { // Mechanic 1, Medium: the horde and the Molotov
     map: MEDIUM_MAP,
@@ -300,7 +300,7 @@ export const LEVELS: LevelData[] = [
     snipers: [],
     breakableCrates: false,
     gunnerSeenAt: 0,
-    rubble: [],
+    revealed: [],
   },
   { // Mechanic 1, Hard: night. Listen Mode, one-bottle stashes, thunder
     map: HARD_MAP,
@@ -321,7 +321,7 @@ export const LEVELS: LevelData[] = [
     snipers: [],
     breakableCrates: false,
     gunnerSeenAt: 0,
-    rubble: [],
+    revealed: [],
   },
   { // Mechanic 2, Easy: the tower sniper, then the machine gun
     map: M2_EASY_MAP,
@@ -354,7 +354,7 @@ export const LEVELS: LevelData[] = [
     ],
     breakableCrates: false,
     gunnerSeenAt: 0,
-    rubble: [],
+    revealed: [],
   },
   { // Mechanic 2, Medium: the mad sniper, cover that breaks, smoke stolen from the army
     map: M2_MEDIUM_MAP,
@@ -388,12 +388,13 @@ export const LEVELS: LevelData[] = [
     ],
     breakableCrates: true,
     gunnerSeenAt: 84,
-    // On the way back: a wall section collapsed in the shooting; its rubble makes 2-tile steps from the
-    // ground (26) up to the scaffolding (segment 35..38, row 19) halfway through area 1.
-    rubble: [
-      [32, 24], [32, 25],
-      [33, 22], [33, 23], [33, 24], [33, 25],
-      [34, 20], [34, 21], [34, 22], [34, 23], [34, 24], [34, 25],
+    // On the way back (coming from the right): a wooden scaffold staircase going up to the LEFT, every
+    // step solid to the ground, small rises only: ground -> (43..44, top 24): 2 -> (41..42, top 23): 1
+    // -> (39..40, top 21): 2 -> the scaffolding segment 35..38 (top 19): 2. Nothing overhead anywhere.
+    revealed: [
+      [43, 24], [44, 24], [43, 25], [44, 25],
+      [41, 23], [42, 23], [41, 24], [42, 24], [41, 25], [42, 25],
+      [39, 21], [40, 21], [39, 22], [40, 22], [39, 23], [40, 23], [39, 24], [40, 24], [39, 25], [40, 25],
     ],
   },
 ];

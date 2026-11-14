@@ -780,6 +780,20 @@ def draw_scaffold_sprite():
     return c.image().crop((0, 0, 32, 12))
 
 
+def draw_scaffold_block_sprite():
+    """One tile of a solid wooden scaffold tower (steps that appear in M2 Medium): a plank on top, a
+    frame and a cross brace, 32x32 px."""
+    c = Canvas()
+    c.rect(0, 0, 31, 4, '<'); c.row(0, 0, 31, '>')      # top plank
+    for x in (7, 15, 23):
+        c.rect(x, 0, x, 4, '?')
+    c.rect(0, 5, 2, 31, '>'); c.rect(29, 5, 31, 31, '>')  # posts
+    c.rect(0, 29, 31, 31, '>')                           # bottom rail
+    c.stroke((3, 28), (28, 6), 2, '<')                    # cross brace
+    c.stroke((3, 6), (28, 28), 2, '<')
+    return c.image().crop((0, 0, 32, 32))
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -828,6 +842,7 @@ def main():
     draw_dead_soldier_sprite().save(os.path.join(out_dir, 'dead_soldier.png'))
     draw_newspaper_sprite().save(os.path.join(out_dir, 'newspaper.png'))
     draw_scaffold_sprite().save(os.path.join(out_dir, 'scaffold.png'))
+    draw_scaffold_block_sprite().save(os.path.join(out_dir, 'scaffold_block.png'))
     draw_big_crate_damaged(False).save(os.path.join(out_dir, 'big_crate_cracked.png'))
     draw_big_crate_damaged(True).save(os.path.join(out_dir, 'big_crate_broken.png'))
     draw_concrete_sprite().save(os.path.join(out_dir, 'concrete.png'))
