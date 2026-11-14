@@ -111,6 +111,7 @@ export class Player {
   canListen = false; // Listen Mode unlocked (Hard level, then every level once Hard is finished)
   listening = false; // holding Listen: frozen, crouched, silent (the scene draws what he hears)
   listenEnergy = 1; // 0..1: drains while listening, recharges otherwise
+  invisible = false; // cheat: nothing can see, sense or catch him
   listenExhausted = false; // ran dry: locked until fully recharged
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
   landCount = 0; // loud landings so far
@@ -303,7 +304,7 @@ export class Player {
     b.setVelocity(vx, vy);
 
     this.footsteps(dt, onGround, Math.abs(vx));
-    this.hidden = this.crouched && this.behindCover();
+    this.hidden = this.invisible || (this.crouched && this.behindCover());
     this.state = this.computeState(Math.abs(vx));
 
     if (this.debugView) this.debugView.onStep();
@@ -347,6 +348,7 @@ export class Player {
     if (this.dead) this.sprite.setTint(0xff6060);
     else if (this.hidden) this.sprite.setTint(HIDDEN_TINT);
     else this.sprite.clearTint();
+    this.sprite.setAlpha(this.invisible ? 0.45 : 1);
 
     if (this.aiming) this.throwables.drawAim(this.handX(), this.handY(), launchVelocity(this.aimDistance, this.aimArc));
     else this.throwables.clearAim();

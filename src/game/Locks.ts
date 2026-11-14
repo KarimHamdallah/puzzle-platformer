@@ -11,6 +11,7 @@ export const KEY_TINTS = [0xff6a58, 0x7ef08a, 0x7ab4ff];
 
 interface Door {
   zone: Phaser.GameObjects.Zone; // the static body that blocks the way
+  cheated: boolean; // opened by the cheat (locks again when the cheat goes off)
   image: Phaser.GameObjects.Image;
   label: Phaser.GameObjects.Container | null; // "key x N" over doors that need more than one key
   rect: Phaser.Geom.Rectangle;
@@ -70,7 +71,7 @@ export class Locks {
       label = this.scene.add.container(feetX - 4, feetY - h + TILE * 0.45, [key, count]).setDepth(4);
     }
     this.doors.push({
-      zone: zone, image: image, label: label, rect: new Phaser.Geom.Rectangle(feetX - TILE / 2, feetY - h, TILE, h), need: need, open: false,
+      zone: zone, cheated: false, image: image, label: label, rect: new Phaser.Geom.Rectangle(feetX - TILE / 2, feetY - h, TILE, h), need: need, open: false,
     });
   }
 
@@ -127,6 +128,37 @@ export class Locks {
         this.message.setText(text).setPosition(r.centerX, r.y - 10).setAlpha(1);
         this.scene.tweens.killTweensOf(this.message);
         this.scene.tweens.add({ targets: this.message, alpha: 0, delay: 900, duration: 400 });
+      }
+    }
+  }
+
+  /** Cheat on: every locked door opens (horde gates excepted). */
+  cheatOpenDoors(): void {
+    for (let i = 0; i < this.doors.length; i++) {
+      const d = this.doors[i];
+      if (d.need === GATE || d.open) continue;
+      d.cheated = true;
+      this.openDoor(d);
+    }
+  }
+
+  /** Cheat off: the doors it opened lock again (not one the player is standing in). */
+  cheatCloseDoors(playerBody: Phaser.Physics.Arcade.Body): void {
+    for (let i = 0; i < this.doors.length; i++) {
+      const d = this.doors[i];
+      if (!d.cheated || !d.open) continue;
+      const r = d.rect;
+      if (playerBody.right > r.x && playerBody.left < r.right && playerBody.bottom > r.y && playerBody.top < r.bottom) continue;
+      d.cheated = false;
+      d.open = false;
+      const zone = this.scene.add.zone(r.centerX, r.centerY, r.width, r.height);
+      this.solids.add(zone);
+      d.zone = zone;
+      this.scene.tweens.killTweensOf(d.image);
+      d.image.setPosition(r.centerX, r.bottom).setAlpha(1);
+      if (d.label) {
+        this.scene.tweens.killTweensOf(d.label);
+        d.label.setPosition(r.centerX - 4, r.y + TILE * 0.45).setAlpha(1);
       }
     }
   }

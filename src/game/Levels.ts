@@ -54,6 +54,7 @@ export interface LevelData {
   intro: string[]; // the survivor's thoughts when the level starts (Arabic)
   introBanner: string;
   hints: [number, number, string][]; // world text: tile x, y (centre), text
+  cheats: boolean; // 1 unlimited bottles, 2 invisible, 3 open every door (listed on the controls line)
 }
 
 const HARD_INTRO = [
@@ -188,6 +189,7 @@ export const LEVELS: LevelData[] = [
     intro: [],
     introBanner: '',
     hints: [],
+    cheats: false,
   },
   { // Mechanic 1, Medium: the horde and the Molotov
     map: MEDIUM_MAP,
@@ -204,6 +206,7 @@ export const LEVELS: LevelData[] = [
     intro: [],
     introBanner: '',
     hints: [],
+    cheats: false,
   },
   { // Mechanic 1, Hard: night. Listen Mode, one-bottle stashes, thunder
     map: HARD_MAP,
@@ -220,5 +223,6 @@ export const LEVELS: LevelData[] = [
     intro: HARD_INTRO,
     introBanner: 'NEW ABILITY: LISTEN MODE  (hold Q)',
     hints: [[16, 23.2, 'Hold Q to listen. Something is under the street.']],
+    cheats: true,
   },
 ];

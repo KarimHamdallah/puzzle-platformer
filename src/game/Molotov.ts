@@ -244,7 +244,7 @@ export class MolotovQuest {
   /** 1 = next coloured key, 2 = the rag (skips the trunk: the car then crafts the Molotov). */
   private devShortcuts(): void {
     const p = this.progress;
-    if (this.input.pressed(Action.DevKey)) {
+    if (this.input.pressed(Action.Num1)) {
       for (let c = 0; c < KeyColor.Count; c++) {
         if (p.keyHeld[c] || p.keysUsed) continue;
         p.keyHeld[c] = true;
@@ -253,7 +253,7 @@ export class MolotovQuest {
         break;
       }
     }
-    if (this.input.pressed(Action.DevRag) && !p.molotov) {
+    if (this.input.pressed(Action.Num2) && !p.molotov) {
       p.rag = true;
       p.sawHorde = true;
       p.carStage = Math.max(p.carStage, 2);

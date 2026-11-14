@@ -121,6 +121,9 @@ export class LevelScene extends Phaser.Scene {
   private hudMolotov: Phaser.GameObjects.Image | null = null;
   private noiseMeter!: NoiseMeter;
   private blackout!: Blackout;
+  private cheating = false; // Hard's cheat key: unlimited bottles + invisible + every door open
+  private bottlesBeforeCheat = 0;
+  private cheatText: Phaser.GameObjects.Text | null = null;
   private summoned: Zombie[] = []; // Runners called in by Screamers
   private world!: Phaser.Physics.Arcade.World;
   private hudCount!: Phaser.GameObjects.Text;
@@ -252,6 +255,7 @@ export class LevelScene extends Phaser.Scene {
       return;
     }
     if (this.controls.pressed(Action.Reset)) this.restartLevel();
+    if (LEVEL.cheats) this.cheats();
 
     this.player.update(deltaMs);
     for (let i = 0; i < this.zombies.length; i++) this.zombies[i].update(time);
@@ -425,6 +429,28 @@ export class LevelScene extends Phaser.Scene {
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.restart(data));
   }
 
+  /**
+   * Hard's cheat key (1), a toggle: ON = unlimited bottles + invisible (nothing sees, senses or catches
+   * you) + every locked door open. OFF = your bottles as they were, visible, and the doors the cheat
+   * opened lock again.
+   */
+  private cheats(): void {
+    if (this.controls.pressed(Action.Num1)) {
+      this.cheating = !this.cheating;
+      this.player.invisible = this.cheating;
+      if (this.cheating) {
+        this.bottlesBeforeCheat = this.throwables.count;
+        this.locks.cheatOpenDoors();
+      } else {
+        this.throwables.count = this.bottlesBeforeCheat;
+        this.locks.cheatCloseDoors(this.player.body);
+      }
+      this.banner(this.cheating ? 'CHEATS ON' : 'CHEATS OFF', 1200);
+      if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: UNLIMITED BOTTLES  INVISIBLE  DOORS OPEN' : '');
+    }
+    if (this.cheating && this.throwables.count < 9) this.throwables.count = 9;
+  }
+
   /** Back to the level select (Esc, or after finishing the level). */
   private toMenu(): void {
     if (this.restarting) return;
@@ -489,12 +515,18 @@ export class LevelScene extends Phaser.Scene {
           .setScrollFactor(0).setDepth(50));
       }
     }
+    if (LEVEL.cheats) {
+      this.cheatText = this.add.text(24, 140, '', {
+        fontFamily: 'Georgia, serif', fontSize: '20px', fontStyle: 'bold', color: '#ff9a40', stroke: '#000000', strokeThickness: 4,
+      }).setScrollFactor(0).setDepth(50);
+    }
     if (this.quest) {
       this.hudMolotov = this.add.image(48, 168, 'molotov').setScale(ART_SCALE * 2.2).setScrollFactor(0).setDepth(50).setVisible(false);
     }
     this.add.text(24, this.scale.height - 20,
       'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Read / look ↑'
-      + (this.player.canListen ? '   Listen Q (hold)' : '') + '   Checkpoint R   Levels Esc', {
+      + (this.player.canListen ? '   Listen Q (hold)' : '') + '   Checkpoint R   Levels Esc'
+      + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles + invisible + every door open' : ''), {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }

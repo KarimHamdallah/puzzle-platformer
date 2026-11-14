@@ -14,8 +14,8 @@ export enum Action {
   Reset,
   Back, // leave the level for the level select
   Listen, // hold: Listen Mode (Hard level's upgrade)
-  DevKey, // debug builds: give the next coloured key
-  DevRag, // debug builds: give the rag
+  Num1, // number-row shortcuts: the cheat toggle (Hard) / dev shortcuts (Medium, debug builds)
+  Num2,
   Count, // number of actions, keep last
 }
 
@@ -44,8 +44,8 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['KeyR', Action.Reset],
   ['Escape', Action.Back],
   ['KeyQ', Action.Listen],
-  ['Digit1', Action.DevKey],
-  ['Digit2', Action.DevRag],
+  ['Digit1', Action.Num1],
+  ['Digit2', Action.Num2],
 ]);
 
 class ActionState {
