@@ -49,6 +49,9 @@ class PlayerTuning {
   // presentation
   squash = 0.22; // squash & stretch strength (0 = off)
   ghostAlpha = 0.22; // takeoff shadow opacity (0 = off)
+  // Listen Mode
+  listenTime = 4; // s of listening on a full charge
+  listenRecharge = 6; // s from empty to full; run it dry and it is locked until full again
 }
 
 const T = new PlayerTuning();
@@ -107,6 +110,8 @@ export class Player {
   hidden = false; // crouched behind cover: sighted enemies cannot see him
   canListen = false; // Listen Mode unlocked (Hard level, then every level once Hard is finished)
   listening = false; // holding Listen: frozen, crouched, silent (the scene draws what he hears)
+  listenEnergy = 1; // 0..1: drains while listening, recharges otherwise
+  listenExhausted = false; // ran dry: locked until fully recharged
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
   landCount = 0; // loud landings so far
   dead = false;
@@ -228,7 +233,18 @@ export class Player {
     if (!onGround || this.input.held(Action.Sprint) || this.input.held(Action.Throw)) this.crouchWanted = false;
     // Listen Mode: hold on the ground to freeze in a crouch (still hidden behind cover, silent).
     this.listening = this.canListen && onGround && this.input.held(Action.Listen) && !this.aiming
-      && this.throwTimer <= 0 && this.attackTimer <= 0;
+      && this.throwTimer <= 0 && this.attackTimer <= 0 && !this.listenExhausted;
+    if (this.listening) {
+      this.listenEnergy -= dt / T.listenTime;
+      if (this.listenEnergy <= 0) { // ran dry: it stops by itself, and waits for a full recharge
+        this.listenEnergy = 0;
+        this.listenExhausted = true;
+        this.listening = false;
+      }
+    } else {
+      this.listenEnergy = Math.min(1, this.listenEnergy + dt / T.listenRecharge);
+      if (this.listenEnergy >= 1) this.listenExhausted = false;
+    }
     const crouchNow = this.crouchWanted || this.listening;
     if (crouchNow && !this.crouched) this.setCrouched(true);
     else if (!crouchNow && this.crouched && this.canStand()) this.setCrouched(false);
@@ -672,6 +688,8 @@ class PlayerDebug {
     t.add('strideLength', 0.3, 3, 0.05);
     t.add('squash', 0, 0.6, 0.01);
     t.add('ghostAlpha', 0, 1, 0.01);
+    t.add('listenTime', 0.5, 15, 0.1);
+    t.add('listenRecharge', 0.5, 20, 0.1);
     this.tuning = t;
 
     const f = debug.gui.addFolder('player');

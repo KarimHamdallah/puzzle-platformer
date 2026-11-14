@@ -6,18 +6,20 @@ import { ZombieKind, type Zombie } from './Zombie';
 
 /**
  * Hard level: night, and the Listen Mode upgrade.
- *  - Darkness: everything past ~5 tiles from the player is black (a screen-space layer with a soft
+ *  - Darkness: everything past ~3.5 tiles from the player is black (a screen-space layer with a soft
  *    hole of light around him). HUD, aim arc and noise rings draw above it.
  *  - Clicks: every Clicker flashes a little light at its head every 2-3 s. In the dark, that is how
  *    you find them.
  *  - Lightning: every 12-20 s the whole level flashes white; the thunder follows a second later and
  *    masks footsteps and landings for THUNDER_MASK s (the HUD boot turns blue). Cross while it rolls.
  *  - Listen Mode (hold Q, any level once unlocked): frozen and crouched, the world goes grey and every
- *    infected within LISTEN_RANGE shows as a white silhouette, through walls and darkness.
+ *    infected within LISTEN_RANGE shows as a white silhouette, through walls and darkness. It runs on
+ *    a charge (Player.listenEnergy): ~4 s of listening, then a full recharge before it works again.
+ *    The HUD bar next to the boot shows it: blue = ready, red = recharging after running dry.
  */
 
 const DARKNESS = 0.92; // alpha of the night
-const LIGHT_RADIUS = 5.5; // tiles
+const LIGHT_RADIUS = 3.5; // tiles
 const CLICK_RADIUS = 1.4; // tiles of light a click shows
 const CLICK_TIME = 0.35; // s
 const CLICK_MIN = 1.8; // s between clicks
@@ -28,6 +30,12 @@ const STRIKE_MAX = 20;
 const THUNDER_DELAY = 1; // s from the lightning to the thunder
 const THUNDER_MASK = 2; // s of masked footsteps
 const LISTEN_RANGE = 20; // tiles
+const BAR_X = 290; // listen bar (HUD, screen px): right of the noise meter
+const BAR_Y = 38;
+const BAR_W = 150;
+const BAR_H = 12;
+const BAR_READY = 0x8fc8ff;
+const BAR_EMPTY = 0xff6a58;
 const DEPTH_NIGHT = 40; // above the world, below the HUD (50); rings / aim / silhouettes go above it
 
 // Lightning brightness over time (s after the strike): a double flash, then a fade back to night.
@@ -54,7 +62,9 @@ export class Blackout {
   private flashAge = -1; // s since the last lightning, -1 = none in progress
   private thunderTimer = -1; // s until the thunder, -1 = none pending
   private grey: Phaser.FX.ColorMatrix | null = null;
+  private greyOn = false;
   private readonly ghosts: Phaser.GameObjects.Sprite[] = []; // Listen Mode silhouettes
+  private bar: Phaser.GameObjects.Graphics | null = null;
 
   constructor(scene: Phaser.Scene, player: Player, zombies: Zombie[], noise: NoiseSystem, night: boolean) {
     this.scene = scene;
@@ -62,10 +72,15 @@ export class Blackout {
     this.zombies = zombies;
     this.noise = noise;
     this.night = night;
+    if (player.canListen) {
+      this.bar = scene.add.graphics().setScrollFactor(0).setDepth(50);
+      scene.add.text(BAR_X, BAR_Y - 4, 'LISTEN  Q', {
+        fontFamily: 'Georgia, serif', fontSize: '16px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
+    }
     const cam = scene.cameras.main;
     if (cam.postFX) {
-      this.grey = cam.postFX.addColorMatrix();
-      this.grey.active = false;
+      this.grey = cam.postFX.addColorMatrix(); // identity until Listen Mode
     }
     if (!night) return;
     makeLightTexture(scene, 'light_player', LIGHT_RADIUS * TILE);
@@ -85,6 +100,7 @@ export class Blackout {
   update(deltaMs: number): void {
     const dt = deltaMs / 1000;
     this.updateListen();
+    this.drawBar();
     if (!this.night || !this.darkness || !this.lightImg || !this.clickImg) return;
     this.updateClicks(dt);
     this.updateWeather(dt);
@@ -143,13 +159,12 @@ export class Blackout {
   /** Listen Mode: grey world + white silhouettes of every infected in range, above walls and night. */
   private updateListen(): void {
     const on = this.player.listening;
-    if (this.grey) {
-      if (on && !this.grey.active) {
-        this.grey.active = true;
-        this.grey.grayscale(1);
-      } else if (!on && this.grey.active) {
-        this.grey.active = false;
-      }
+    // The colour matrix stays on the camera; Listen sets it to grey, releasing resets it to identity
+    // (the FX's `active` flag does not stop a camera post effect: colours stayed grey after letting go).
+    if (this.grey && on !== this.greyOn) {
+      this.greyOn = on;
+      if (on) this.grey.grayscale(1);
+      else this.grey.reset();
     }
     let used = 0;
     if (on) {
@@ -168,6 +183,17 @@ export class Blackout {
       }
     }
     for (let i = used; i < this.ghosts.length; i++) this.ghosts[i].setVisible(false);
+  }
+
+  /** Listen charge: blue while usable, red while recharging after running dry. */
+  private drawBar(): void {
+    if (!this.bar) return;
+    const p = this.player;
+    const g = this.bar;
+    g.clear();
+    g.fillStyle(0x000000, 0.65).fillRect(BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6);
+    g.fillStyle(p.listenExhausted ? BAR_EMPTY : BAR_READY, p.listening ? 1 : 0.85);
+    g.fillRect(BAR_X, BAR_Y, BAR_W * p.listenEnergy, BAR_H);
   }
 }
 
