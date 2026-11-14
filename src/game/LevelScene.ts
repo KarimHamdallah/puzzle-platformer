@@ -6,12 +6,13 @@ import { Blackout } from './Blackout';
 import { CameraRig } from './CameraRig';
 import { ART_SCALE, TILE } from './constants';
 import { Dialogue } from './Dialogue';
-import { Letter } from './Letter';
+import { FATHER_LETTER, Letter, SOLDIER_NEWSPAPER } from './Letter';
 import { KeyColor, LEVELS, LevelProgress, type LevelData } from './Levels';
 import { KEY_TINTS, Locks } from './Locks';
 import { MolotovQuest } from './Molotov';
 import { NoiseKind, NoiseMeter, NoiseSystem } from './Noise';
 import { Player } from './Player';
+import { Sniper } from './Sniper';
 import { Throwables } from './Throwing';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 
@@ -62,8 +63,16 @@ const PARALLAX: [string, number][] = [
   ['bg_near', 0.45],
 ];
 
+/** Solid to walk on / collide with: stone and scaffolding. */
 function isSolid(x: number, y: number): boolean {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true; // outside the map counts as wall
+  const c = MAP[y][x];
+  return c === '#' || c === 'Z';
+}
+
+/** Stone only: what the tileset draws and what stops a sniper's line of fire (scaffolding doesn't). */
+function isStone(x: number, y: number): boolean {
+  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true;
   return MAP[y][x] === '#';
 }
 
@@ -121,6 +130,7 @@ export class LevelScene extends Phaser.Scene {
   private hudMolotov: Phaser.GameObjects.Image | null = null;
   private noiseMeter!: NoiseMeter;
   private blackout!: Blackout;
+  private snipers: Sniper[] = [];
   private cheating = false; // Hard's cheat key: unlimited bottles + invisible + every door open
   private bottlesBeforeCheat = 0;
   private cheatText: Phaser.GameObjects.Text | null = null;
@@ -171,6 +181,7 @@ export class LevelScene extends Phaser.Scene {
     this.exit = null;
     this.zombieDebug = null;
     this.letter = null;
+    this.snipers = [];
     this.dialogue = null;
     this.quest = null;
     this.groupZombies = [];
@@ -214,6 +225,10 @@ export class LevelScene extends Phaser.Scene {
     for (let i = 0; i < this.zombies.length; i++) this.physics.add.collider(this.zombies[i].body, solids);
 
     this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
+    for (let i = 0; i < LEVEL.snipers.length; i++) {
+      this.snipers.push(new Sniper(this, LEVEL.snipers[i], this.player, this.zombies, this.covers,
+        (x, y) => isStone(Math.floor(x / TILE), Math.floor(y / TILE))));
+    }
     this.player.canListen = LEVEL.grantsListen || listenUnlocked();
     this.blackout = new Blackout(this, this.player, this.zombies, this.noise, LEVEL.night);
     for (let i = 0; i < LEVEL.hints.length; i++) {
@@ -263,6 +278,7 @@ export class LevelScene extends Phaser.Scene {
     this.noise.update(deltaMs);
     this.cameraRig.update(deltaMs);
     this.blackout.update(deltaMs);
+    for (let i = 0; i < this.snipers.length; i++) this.snipers[i].update(time);
 
     const scrollX = this.cameras.main.scrollX;
     for (let i = 0; i < this.parallax.length; i++) this.parallax[i].tilePositionX = scrollX * PARALLAX[i][1];
@@ -292,6 +308,7 @@ export class LevelScene extends Phaser.Scene {
         z.summons = 0;
       }
     }
+    for (let i = 0; i < this.snipers.length; i++) this.snipers[i].fixedUpdate(dt);
     this.dropGroupKeys();
     this.locks.fixedUpdate(dt, this.player.body);
     if (this.quest) this.quest.fixedUpdate();
@@ -546,11 +563,15 @@ export class LevelScene extends Phaser.Scene {
 
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
-        if (!isSolid(x, y)) continue;
-        const top = !isSolid(x, y - 1);
-        const bottom = !isSolid(x, y + 1);
-        const left = !isSolid(x - 1, y);
-        const right = !isSolid(x + 1, y);
+        if (MAP[y][x] === 'Z') { // scaffolding: planks, drawn as an image
+          this.add.image(x * TILE, y * TILE, 'scaffold').setOrigin(0, 0).setScale(ART_SCALE).setDepth(1);
+          continue;
+        }
+        if (!isStone(x, y)) continue;
+        const top = !isStone(x, y - 1);
+        const bottom = !isStone(x, y + 1);
+        const left = !isStone(x - 1, y);
+        const right = !isStone(x + 1, y);
         const row = top ? 0 : bottom ? 2 : 1;
         let index: number;
         if (left && right) index = PANEL_COLUMN_1WIDE[row];
@@ -653,8 +674,23 @@ export class LevelScene extends Phaser.Scene {
             this.addCoverCrate(feetX, feetY);
             break;
           case 'L':
-            this.letter = new Letter(this, this.controls, (x + 1) * TILE, feetY);
+            this.letter = new Letter(this, this.controls, FATHER_LETTER, (x + 1) * TILE, feetY);
             break;
+          case 'J':
+            this.letter = new Letter(this, this.controls, SOLDIER_NEWSPAPER, feetX, feetY);
+            break;
+          case 'W':
+            this.addBigCrate(feetX, feetY);
+            break;
+          case 'A':
+            this.add.image(feetX, feetY + 2, 'tent').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);
+            break;
+          case 'F': {
+            this.add.image(feetX, feetY + 2, 'campfire').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(4);
+            const flames = this.add.sprite(feetX, feetY - 6, 'fire').setOrigin(0.5, 1).setScale(1.3).setDepth(4);
+            flames.play('fire');
+            break;
+          }
           case 'b':
             this.add.image(feetX, feetY, x % 2 === 0 ? 'box1' : 'box2').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);
             break;
@@ -721,6 +757,12 @@ export class LevelScene extends Phaser.Scene {
       }
     }
     return false;
+  }
+
+  /** Mechanic 2's big crate (~1.6 tiles): cover from soldiers' fire, and from zombies when crouched. */
+  private addBigCrate(feetX: number, feetY: number): void {
+    const img = this.add.image(feetX, feetY, 'big_crate').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(12);
+    this.covers.push(new Phaser.Geom.Rectangle(feetX - img.displayWidth / 2, feetY - img.displayHeight, img.displayWidth, img.displayHeight));
   }
 
   /** Two stacked crates (1.5 tiles tall), drawn IN FRONT of the player; crouching inside the area hides you. */

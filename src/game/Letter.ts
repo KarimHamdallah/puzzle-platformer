@@ -4,9 +4,11 @@ import { ART_SCALE, TILE } from './constants';
 import type { Player } from './Player';
 
 /**
- * The father's letter: a dead survivor at the start of the level, sitting against a wall with a letter
- * for his son in his lap. It is the game's guide, written as his will (Arabic, Noto Naskh font).
- *  - A "!" bobs over him until the letter has been read once (remembered across restarts).
+ * Documents found on the dead (Arabic, Noto Naskh font): the game's guides, told as story.
+ *  - FATHER_LETTER (Mechanic 1): a survivor against a wall, his will to his son; the noise guide.
+ *  - SOLDIER_NEWSPAPER (Mechanic 2): a deserter shot by his own snipers, the army's paper with his note
+ *    in the margin; the sniper guide.
+ *  - A "!" bobs over the body until the document has been read once (remembered across restarts).
  *  - Standing next to him: Up opens the letter. The game pauses while it is open.
  *  - Arabic book order: ← next page, → previous page; Up / Space / X closes it.
  *  - The paper is an HTML element over the canvas (Phaser DOM): real text shaping, wrapping and fonts.
@@ -15,6 +17,20 @@ import type { Player } from './Player';
 interface LetterPage {
   title: string;
   paragraphs: string[];
+  ink?: boolean; // handwritten in the margin (pencil), not printed
+}
+
+/** A document on a body: its pages, how it looks, and the body it lies with. */
+export interface LetterDoc {
+  id: string; // remembers "read" across restarts
+  pages: LetterPage[];
+  signature: string; // under the last page
+  style: string; // extra CSS class on the paper: '' = letter, 'newspaper'
+  masthead: string; // newspaper name over the first page ('' = none)
+  sprite: string; // the body
+  againstWall: boolean; // true: the body sits with its back to the wall at x (the father)
+  prop: string; // image lying on the ground beside the body ('' = none)
+  prompt: string;
 }
 
 const PAGES: LetterPage[] = [
@@ -79,11 +95,55 @@ const PAGES: LetterPage[] = [
 ];
 
 const SIGNATURE = 'أبوك';
+
+export const FATHER_LETTER: LetterDoc = {
+  id: 'father', pages: PAGES, signature: SIGNATURE, style: '', masthead: '', sprite: 'corpse', againstWall: true, prop: '',
+  prompt: '↑  Read the letter',
+};
+
+export const SOLDIER_NEWSPAPER: LetterDoc = {
+  id: 'newspaper',
+  pages: [
+    {
+      title: 'الجيش يدخل القرية',
+      paragraphs: [
+        'دخلت وحدات الجيش القرية فجر اليوم، بعد أن انتشرت العدوى في أحيائها الشرقية خلال أيامٍ قليلة.',
+        'وقال متحدّثٌ باسم القيادة إنّ القرية «لم تعد قابلةً للإنقاذ»، وإنّ قرارًا صدر بإبادتها بالكامل، شارعًا شارعًا، وبيتًا بيتًا.',
+        'ولم يُعلَن عن أي ممرٍّ آمنٍ للسكان.',
+      ],
+    },
+    {
+      title: 'لا أحد يخرج، لا أحد يدخل',
+      paragraphs: [
+        'وجاء في البيان أنّ كل من يغادر القرية سيُعامَل كمصاب، حتى لو بدا سليمًا؛ فالعدوى لا تظهر في ساعاتها الأولى، وقد يحملها من لا يعرف أنه يحملها.',
+        'وصدر أمرٌ بتصفية أي شخصٍ يُرصد خارجًا من القرية أو داخلًا إليها، دون إنذار.',
+        'ونُشر القنّاصة على الأبراج المطلّة على الطرق، ولديهم أوامر صريحة: لا تمييز بين مصابٍ وسليم، ولا بين إنسانٍ ومسخ.',
+      ],
+    },
+    {
+      title: 'على الهامش، بقلم رصاص',
+      ink: true,
+      paragraphs: [
+        'كنتُ واحدًا منهم. رأيتهم يطلقون النار على أناسٍ لم تمسّهم العدوى. حاولتُ أن أهرب... ورآني القنّاص في البرج.',
+        'إن وجدتَ هذه الجريدة: لا تقف في الضوء الأحمر. إن لمسك مرة، لن يتركك أبدًا.',
+        'لكنه يحتاج ثوانيَ ليُعيد التلقيم بعد كل طلقة. لا تتحرك حين يصوّب؛ تحرّك حين يُعمّر، من صندوقٍ إلى صندوق.',
+        'والرشّاش عند البيت الأخير لا يرحم أحدًا... ولا حتى الموتى الذين يمشون.',
+      ],
+    },
+  ],
+  signature: 'جنديٌّ هارب',
+  style: 'newspaper',
+  masthead: 'صحيفة الوادي — العدد الأخير',
+  sprite: 'dead_soldier',
+  againstWall: false,
+  prop: 'newspaper',
+  prompt: '↑  Read the newspaper',
+};
 const READ_RANGE_X = 1.4 * TILE; // how close you must stand to pick up the letter
 const READ_RANGE_Y = 0.6 * TILE;
 const CORPSE_BACK = 37 / 44; // the corpse sprite's back edge (fraction of its width): sits against the wall
 
-let letterRead = false; // survives scene restarts: the "!" over the father only shows until it was read once
+const readDocs = new Set<string>(); // survives scene restarts: the "!" over a body only shows until it was read once
 
 export class Letter {
   open = false;
@@ -101,20 +161,32 @@ export class Letter {
   private readonly bodyEl: HTMLDivElement;
   private readonly signEl: HTMLDivElement;
   private readonly pageEl: HTMLDivElement;
+  private readonly mastheadEl: HTMLDivElement;
+  private readonly doc: LetterDoc;
   private page = 0;
 
-  /** wallX = left edge of the wall he leans on (px), feetY = floor (px). */
-  constructor(scene: Phaser.Scene, input: InputActions, wallX: number, feetY: number) {
+  /**
+   * x = the wall the body leans on (doc.againstWall: its left edge, px) or the body's centre (px);
+   * feetY = floor (px).
+   */
+  constructor(scene: Phaser.Scene, input: InputActions, doc: LetterDoc, x: number, feetY: number) {
     this.scene = scene;
     this.input = input;
-    const corpse = scene.add.image(wallX, feetY, 'corpse').setOrigin(CORPSE_BACK, 1).setScale(ART_SCALE).setDepth(11.5); // in front of the grass (11)
-    this.x = wallX - corpse.displayWidth * (CORPSE_BACK - 0.5);
+    this.doc = doc;
+    if (doc.againstWall) {
+      const corpse = scene.add.image(x, feetY, doc.sprite).setOrigin(CORPSE_BACK, 1).setScale(ART_SCALE).setDepth(11.5); // in front of the grass (11)
+      this.x = x - corpse.displayWidth * (CORPSE_BACK - 0.5);
+    } else {
+      scene.add.image(x, feetY + 4, doc.sprite).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(11.5);
+      this.x = x;
+    }
+    if (doc.prop) scene.add.image(this.x - TILE * 0.9, feetY + 2, doc.prop).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(11.6);
     this.y = feetY;
 
     this.marker = scene.add.text(this.x, feetY - TILE * 1.2, '!', {
       fontFamily: 'Georgia, serif', fontSize: '56px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5, 1).setDepth(25);
-    this.prompt = scene.add.text(this.x, feetY - TILE * 1.25, '↑  Read the letter', {
+    this.prompt = scene.add.text(this.x, feetY - TILE * 1.25, doc.prompt, {
       fontFamily: 'Georgia, serif', fontSize: '26px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 5,
     }).setOrigin(0.5, 1).setDepth(25).setVisible(false);
 
@@ -123,9 +195,9 @@ export class Letter {
     this.shade = scene.add.rectangle(0, 0, w, h, 0x0b0a08, 0.72).setOrigin(0, 0).setScrollFactor(0).setDepth(90).setVisible(false);
 
     const root = document.createElement('div');
-    root.className = 'letter';
+    root.className = doc.style ? 'letter ' + doc.style : 'letter';
     root.innerHTML =
-      '<div class="letter-paper"><div class="letter-title"></div><div class="letter-body"></div>'
+      '<div class="letter-paper"><div class="letter-masthead"></div><div class="letter-title"></div><div class="letter-body"></div>'
       + '<div class="letter-sign"></div><div class="letter-page"></div></div>'
       + '<div class="letter-keys"><span>← الصفحة التالية</span><span>→ السابقة</span><span>↑ إغلاق</span></div>';
     this.paper = root.querySelector('.letter-paper') as HTMLDivElement;
@@ -133,6 +205,7 @@ export class Letter {
     this.bodyEl = root.querySelector('.letter-body') as HTMLDivElement;
     this.signEl = root.querySelector('.letter-sign') as HTMLDivElement;
     this.pageEl = root.querySelector('.letter-page') as HTMLDivElement;
+    this.mastheadEl = root.querySelector('.letter-masthead') as HTMLDivElement;
     this.element = scene.add.dom(w / 2, h / 2, root).setScrollFactor(0).setDepth(100).setVisible(false);
     void document.fonts.load('31px "Noto Naskh Arabic"'); // fetch the font now, not on the first page
   }
@@ -149,8 +222,9 @@ export class Letter {
 
     const near = !player.dead && Math.abs(player.feetX - this.x) < READ_RANGE_X && Math.abs(player.feetY - this.y) < READ_RANGE_Y;
     this.prompt.setVisible(near);
-    this.marker.setVisible(!letterRead && !near);
-    if (!letterRead) { // bob + pulse: "something here"
+    const read = readDocs.has(this.doc.id);
+    this.marker.setVisible(!read && !near);
+    if (!read) { // bob + pulse: "something here"
       this.marker.y = this.y - TILE * 1.2 + Math.sin(timeMs / 220) * 8;
       this.marker.setScale(1 + Math.sin(timeMs / 140) * 0.08);
     }
@@ -159,7 +233,7 @@ export class Letter {
 
   private show(): void {
     this.open = true;
-    letterRead = true;
+    readDocs.add(this.doc.id);
     this.page = 0;
     this.scene.physics.pause(); // the world stops while you read
     this.shade.setVisible(true);
@@ -183,7 +257,7 @@ export class Letter {
 
   private turn(step: number): void {
     const next = this.page + step;
-    if (next >= PAGES.length) {
+    if (next >= this.doc.pages.length) {
       this.close(); // past the last page: put the letter down
       return;
     }
@@ -196,7 +270,11 @@ export class Letter {
   }
 
   private render(): void {
-    const p = PAGES[this.page];
+    const pages = this.doc.pages;
+    const p = pages[this.page];
+    this.mastheadEl.textContent = this.page === 0 ? this.doc.masthead : '';
+    this.mastheadEl.style.display = this.page === 0 && this.doc.masthead ? '' : 'none';
+    this.bodyEl.classList.toggle('ink', p.ink === true);
     this.titleEl.textContent = p.title;
     this.titleEl.style.display = p.title ? '' : 'none';
     this.bodyEl.textContent = '';
@@ -205,9 +283,9 @@ export class Letter {
       el.textContent = p.paragraphs[i];
       this.bodyEl.appendChild(el);
     }
-    const last = this.page === PAGES.length - 1;
-    this.signEl.textContent = last ? SIGNATURE : '';
-    this.pageEl.textContent = toArabicDigits(this.page + 1) + ' / ' + toArabicDigits(PAGES.length);
+    const last = this.page === pages.length - 1;
+    this.signEl.textContent = last ? this.doc.signature : '';
+    this.pageEl.textContent = toArabicDigits(this.page + 1) + ' / ' + toArabicDigits(pages.length);
   }
 }
 

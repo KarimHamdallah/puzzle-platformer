@@ -84,6 +84,21 @@ PALETTE = {
     # rag
     '=': (196, 186, 150),  # cloth
     '-': (150, 138, 104),  # cloth shade
+    # soldiers (Mechanic 2)
+    '&': (84, 94, 66),     # fatigues, olive drab
+    '*': (58, 66, 46),     # fatigue shade
+    '(': (74, 84, 60),     # helmet
+    ')': (46, 54, 40),     # helmet shade
+    '[': (44, 42, 42),     # gunmetal
+    ']': (104, 72, 44),    # rifle stock / webbing
+    '{': (176, 156, 112),  # sandbag
+    '}': (132, 114, 80),   # sandbag shade
+    '+': (124, 118, 86),   # tent canvas
+    '|': (90, 86, 62),     # tent shade
+    '<': (156, 108, 64),   # crate wood
+    '>': (112, 76, 46),    # crate wood shade
+    '?': (70, 46, 28),     # crate gaps
+    '/': (66, 62, 58),     # newsprint ink
 }
 
 
@@ -568,6 +583,120 @@ def draw_boot_sprite():
     return c.image().crop((0, 0, 16, 13))
 
 
+def draw_big_crate_sprite():
+    """Mechanic 2 cover: a big wooden crate (planks, frame, diagonal brace), 52x52 px."""
+    c = Canvas()
+    x0, y0, x1, y1 = 4, 40, 55, 91
+    c.rect(x0, y0, x1, y1, '<')
+    for y in range(y0 + 7, y1, 8):              # plank gaps
+        c.row(y, x0, x1, '?')
+    c.rect(x0, y0, x1, y0 + 4, '>'); c.rect(x0, y1 - 4, x1, y1, '>')       # frame
+    c.rect(x0, y0, x0 + 4, y1, '>'); c.rect(x1 - 4, y0, x1, y1, '>')
+    c.stroke((x0 + 3, y1 - 3), (x1 - 3, y0 + 3), 4, '>')                    # brace
+    for x, y in ((x0 + 2, y0 + 2), (x1 - 2, y0 + 2), (x0 + 2, y1 - 2), (x1 - 2, y1 - 2)):
+        c.put(x, y, '5')                        # nails
+    c.outline()
+    return c.image().crop((x0 - 1, y0 - 1, x1 + 2, y1 + 2))
+
+
+def draw_sandbags(c, x0, x1, top):
+    """Rows of sandbags from `top` down to y 91, staggered."""
+    for r, y in enumerate(range(top, 91, 5)):
+        off = 0 if r % 2 == 0 else 4
+        for x in range(x0 + off, x1, 8):
+            c.rect(x, y, min(x + 7, x1), y + 4, '{')
+            c.row(y + 4, x, min(x + 7, x1), '}')
+            c.put(x, y, '}')
+
+
+def draw_nest_sprite(gunner):
+    """A soldier behind sandbags, facing RIGHT (flipped in game). Only helmet, shoulders and the weapon
+    show over the bags: the sniper is hidden. gunner = a machine gun on a bipod instead of a scoped rifle."""
+    c = Canvas()
+    c.rect(30, 66, 42, 78, '&'); c.rect(30, 66, 31, 78, '*')                # shoulders
+    c.rect(34, 58, 40, 65, 'S'); c.rect(34, 58, 35, 65, 's')                # face, cheek on the stock
+    c.rect(32, 54, 42, 58, '('); c.row(58, 31, 43, ')'); c.row(54, 34, 40, ')')   # helmet
+    if gunner:
+        c.rect(40, 64, 62, 67, '['); c.rect(62, 65, 74, 66, '[')            # receiver + thick barrel
+        c.rect(44, 68, 50, 73, ']')                                         # ammo box
+        c.stroke((66, 67), (70, 74), 1, '[')                                # bipod
+        c.rect(74, 64, 75, 67, '[')                                         # muzzle
+        draw_sandbags(c, 18, 78, 72)
+    else:
+        c.rect(36, 66, 44, 68, ']')                                         # stock
+        c.rect(44, 65, 78, 66, '[')                                         # long barrel
+        c.rect(46, 61, 56, 63, '['); c.put(56, 62, '6')                     # scope + glass
+        draw_sandbags(c, 22, 66, 72)
+    c.outline()
+    return c.image().crop((14, 50, 82, 92))       # 68x42
+
+
+def draw_tent_sprite():
+    """A-frame army tent, 65x40 px."""
+    c = Canvas()
+    for i, y in enumerate(range(58, 92)):
+        half = int(i * 0.85) + 1
+        c.row(y, 48 - half, 48 + half, '+')
+        c.row(y, 48, 48 + half, '|')
+    for i, y in enumerate(range(72, 92)):                                   # dark opening
+        half = int(i * 0.35)
+        c.row(y, 48 - half, 48 + half, 'K')
+    c.rect(48, 54, 48, 58, '>')                                             # pole tip
+    c.outline()
+    return c.image().crop((16, 53, 81, 93))
+
+
+def draw_campfire_sprite():
+    """Campfire logs in a ring of stones (the flames are the fire animation), 30x10 px."""
+    c = Canvas()
+    for x in range(36, 62, 4):
+        c.rect(x, 89, x + 2, 91, '5')
+    c.stroke((38, 89), (58, 85), 2, '>')
+    c.stroke((40, 85), (57, 89), 2, ']')
+    c.outline()
+    return c.image().crop((34, 83, 64, 93))
+
+
+def draw_dead_soldier_sprite():
+    """A soldier lying on his back, helmet off beside him, dried blood under him: 52x20 px."""
+    c = Canvas()
+    gy = 91
+    for x in range(22, 70):                                                 # blood pool
+        if (x * 5) % 7 != 0:
+            c.put(x, gy + 1, 'b')
+    c.rect(26, 84, 40, 87, '&'); c.rect(26, 87, 40, 88, '*')               # legs
+    c.rect(22, 83, 26, 88, 'O')                                             # boots
+    c.rect(40, 82, 56, 88, '&'); c.row(88, 40, 56, '*')                     # torso
+    c.stroke((42, 82), (54, 88), 1, ']')                                    # webbing
+    c.rect(57, 82, 62, 88, 'X'); c.put(59, 84, 'x'); c.put(61, 84, 'x')    # head, closed eyes
+    c.stroke((50, 82), (58, 77), 2, '&'); c.rect(58, 75, 60, 77, 'X')      # arm flung up
+    c.rect(64, 85, 69, 88, '('); c.row(88, 64, 69, ')')                     # helmet beside him
+    c.outline()
+    return c.image().crop((20, 73, 72, 93))
+
+
+def draw_newspaper_sprite():
+    """A folded newspaper on the ground, 16x9 px."""
+    c = Canvas()
+    c.rect(2, 2, 15, 8, 'M'); c.row(8, 2, 15, 'm')
+    c.row(3, 4, 13, '/'); c.row(5, 4, 9, '/'); c.row(6, 4, 11, '/'); c.rect(11, 4, 13, 6, '/')
+    c.outline()
+    return c.image().crop((1, 1, 17, 10))
+
+
+def draw_scaffold_sprite():
+    """One tile of wooden scaffolding (Mechanic 2's upper routes): planks with gaps a sniper sees
+    through, a beam under them. 32x12 px (one tile at 2x)."""
+    c = Canvas()
+    c.rect(0, 0, 31, 4, '<')
+    for x in (7, 15, 23, 31):                   # gaps between planks
+        c.rect(x, 0, x, 4, '?')
+    c.row(0, 0, 31, '>')
+    c.rect(0, 7, 31, 8, '>')                    # beam
+    c.rect(3, 5, 4, 11, '>'); c.rect(27, 5, 28, 11, '>')   # brackets
+    return c.image().crop((0, 0, 32, 12))
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -608,6 +737,25 @@ def main():
     draw_rag_sprite().save(os.path.join(out_dir, 'rag.png'))
     draw_fire_frames().save(os.path.join(out_dir, 'fire.png'))
     draw_boot_sprite().save(os.path.join(out_dir, 'boot.png'))
+    draw_big_crate_sprite().save(os.path.join(out_dir, 'big_crate.png'))
+    draw_nest_sprite(False).save(os.path.join(out_dir, 'sniper_nest.png'))
+    draw_nest_sprite(True).save(os.path.join(out_dir, 'gunner_nest.png'))
+    draw_tent_sprite().save(os.path.join(out_dir, 'tent.png'))
+    draw_campfire_sprite().save(os.path.join(out_dir, 'campfire.png'))
+    draw_dead_soldier_sprite().save(os.path.join(out_dir, 'dead_soldier.png'))
+    draw_newspaper_sprite().save(os.path.join(out_dir, 'newspaper.png'))
+    draw_scaffold_sprite().save(os.path.join(out_dir, 'scaffold.png'))
+    if preview_dir:
+        items = [draw_big_crate_sprite(), draw_nest_sprite(False), draw_nest_sprite(True), draw_tent_sprite(),
+                 draw_campfire_sprite(), draw_dead_soldier_sprite(), draw_newspaper_sprite()]
+        pw = sum(i.width for i in items) + 10 * len(items)
+        ph = max(i.height for i in items)
+        prev = Image.new('RGBA', (pw, ph), (90, 96, 110, 255))
+        x = 0
+        for i in items:
+            prev.alpha_composite(i, (x, ph - i.height))
+            x += i.width + 10
+        prev.resize((pw * 4, ph * 4), Image.NEAREST).save(os.path.join(preview_dir, 'm2_props_preview.png'))
     if preview_dir:
         os.makedirs(preview_dir, exist_ok=True)
         corpse = draw_corpse_sprite()

@@ -666,6 +666,11 @@ export class Zombie {
     return false;
   }
 
+  /** Cut down by a soldier's gun (Mechanic 2): soldiers shoot anything that moves. */
+  shot(): void {
+    if (this.alive) this.die();
+  }
+
   private die(): void {
     this.setState(ZombieState.Dead);
     this.distracted = false;

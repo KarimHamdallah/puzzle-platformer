@@ -30,6 +30,8 @@ const THUMB_M1_MEDIUM = 'thumb_m1_medium';
 const THUMB_M1_MEDIUM_PATH = 'assets/thumbs/mechanic1_medium.png';
 const THUMB_M1_HARD = 'thumb_m1_hard';
 const THUMB_M1_HARD_PATH = 'assets/thumbs/mechanic1_hard.png';
+const THUMB_M2_EASY = 'thumb_m2_easy';
+const THUMB_M2_EASY_PATH = 'assets/thumbs/mechanic2_easy.webp';
 
 const SECTIONS: MenuSection[] = [
   {
@@ -48,15 +50,24 @@ const SECTIONS: MenuSection[] = [
       { scene: 'Level', level: 2, label: 'HARD', title: 'Blackout', blurb: 'Night. One bottle at a time. Listen.', thumb: THUMB_M1_HARD },
     ],
   },
+  {
+    heading: 'MECHANIC 2  -  SNIPERS',
+    subheading: 'The army shoots anything that moves. Read the laser, move between shots, let the infected draw the fire.',
+    levels: [
+      { scene: 'Level', level: 3, label: 'EASY', title: 'The Tower', blurb: 'A sniper tower, then a machine gun.', thumb: THUMB_M2_EASY },
+      { scene: '', level: 0, label: 'MEDIUM', title: 'Coming soon', blurb: 'Cover that breaks. A mad sniper. Clickers.', thumb: '' },
+      { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Snipers in the dark. Listen.', thumb: '' },
+    ],
+  },
 ];
 
 const CARD_W = 420;
-const CARD_H = 300;
-const THUMB_H = 175;
+const CARD_H = 222;
+const THUMB_H = 108;
 const PAD = 12;
 const LEFT = 120; // x of the first card / headings
 const GAP = 40;
-const SECTION_Y = [140, 575]; // heading y per section
+const SECTION_Y = [88, 398, 708]; // heading y per section (cards end 72 + CARD_H below, then a gap)
 const GOLD = 0xffd24a;
 const CREAM = 0xf0e6c8;
 const TEXT_STYLE = { fontFamily: 'Georgia, serif', color: '#f0e6c8' };
@@ -90,6 +101,7 @@ export class MenuScene extends Phaser.Scene {
     this.load.image(THUMB_M1_EASY, THUMB_M1_EASY_PATH); // optional: a background crop replaces a missing one
     this.load.image(THUMB_M1_MEDIUM, THUMB_M1_MEDIUM_PATH);
     this.load.image(THUMB_M1_HARD, THUMB_M1_HARD_PATH);
+    this.load.image(THUMB_M2_EASY, THUMB_M2_EASY_PATH);
   }
 
   create(): void {
@@ -106,20 +118,20 @@ export class MenuScene extends Phaser.Scene {
     for (let i = 0; i < layers.length; i++) this.parallax.push(this.add.tileSprite(0, 0, w, h, layers[i]).setOrigin(0, 0));
     this.add.rectangle(0, 0, w, h, 0x0b0a08, 0.62).setOrigin(0, 0);
 
-    this.add.text(w / 2, 62, 'LEVEL SELECT', {
-      ...TEXT_STYLE, fontSize: '64px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 8,
+    this.add.text(w / 2, 48, 'LEVEL SELECT', {
+      ...TEXT_STYLE, fontSize: '56px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5);
 
     for (let s = 0; s < SECTIONS.length; s++) {
       const sec = SECTIONS[s];
       const y = SECTION_Y[s];
       this.add.text(LEFT, y, sec.heading, { ...TEXT_STYLE, fontSize: '34px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 5 });
-      this.add.text(LEFT, y + 44, sec.subheading, { ...TEXT_STYLE, fontSize: '22px', stroke: '#000000', strokeThickness: 3 });
-      for (let c = 0; c < sec.levels.length; c++) this.cards.push(this.createCard(s, c, sec.levels[c], LEFT + c * (CARD_W + GAP), y + 80));
+      this.add.text(LEFT, y + 40, sec.subheading, { ...TEXT_STYLE, fontSize: '22px', stroke: '#000000', strokeThickness: 3 });
+      for (let c = 0; c < sec.levels.length; c++) this.cards.push(this.createCard(s, c, sec.levels[c], LEFT + c * (CARD_W + GAP), y + 72));
     }
 
-    this.notice = this.add.text(w / 2, h - 70, '', { ...TEXT_STYLE, fontSize: '26px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 5 })
-      .setOrigin(0.5).setAlpha(0);
+    this.notice = this.add.text(w - 40, 48, '', { ...TEXT_STYLE, fontSize: '26px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 5 })
+      .setOrigin(1, 0.5).setAlpha(0);
     this.add.text(w / 2, h - 26, '← ↑ ↓ →  choose      Space / Enter  play      Esc in a level  back here      mouse works too', {
       ...TEXT_STYLE, fontSize: '22px', stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5, 1);
