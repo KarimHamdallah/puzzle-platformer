@@ -16,3 +16,109 @@ body {
 canvas {
   image-rendering: pixelated;
 }
+
+/* ---------------------------------------------------------------- the father's letter (Letter.ts) */
+
+@font-face {
+  font-family: 'Noto Naskh Arabic';
+  src: url('/assets/fonts/NotoNaskhArabic.ttf') format('truetype');
+  font-weight: 400 700;
+}
+
+.letter {
+  width: 1180px;
+  direction: rtl;
+  font-family: 'Noto Naskh Arabic', 'Segoe UI', Tahoma, serif;
+  user-select: none;
+}
+
+/* Old paper: warm base, darker burnt edges, a fold, coffee ring, dried blood, faint ruled lines,
+   grain from an SVG noise filter. */
+.letter-paper {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 800px;
+  padding: 64px 96px 70px;
+  color: #2a1d12;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.25 0 0 0 0 0.12 0 0 0 0.22 0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 16% 84%, rgba(84, 18, 12, 0.42) 0, rgba(84, 18, 12, 0.22) 46px, rgba(84, 18, 12, 0) 110px),
+    radial-gradient(circle at 11% 13%, rgba(110, 70, 30, 0) 62px, rgba(110, 70, 30, 0.28) 66px, rgba(110, 70, 30, 0.1) 72px, rgba(110, 70, 30, 0) 76px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0) 49.6%, rgba(90, 60, 30, 0.18) 50%, rgba(255, 255, 255, 0.14) 50.4%, rgba(0, 0, 0, 0) 51%),
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 58px, rgba(70, 90, 120, 0.13) 58px, rgba(70, 90, 120, 0.13) 60px),
+    radial-gradient(ellipse at 50% 45%, #eadcb6 0%, #e0cd9f 58%, #c9ae78 88%, #a88954 100%);
+  box-shadow: inset 0 0 70px rgba(80, 50, 20, 0.55), inset 0 0 14px rgba(60, 35, 10, 0.6), 0 24px 60px rgba(0, 0, 0, 0.7);
+  border-radius: 6px 14px 8px 18px;
+  transform: rotate(-0.8deg);
+}
+
+.letter-paper.turn { animation: letter-turn 0.32s ease-out; }
+.letter-paper.turn-back { animation: letter-turn-back 0.32s ease-out; }
+
+@keyframes letter-turn {
+  0% { opacity: 0.2; transform: rotate(-0.8deg) translateX(-60px) rotateY(18deg); }
+  100% { opacity: 1; transform: rotate(-0.8deg); }
+}
+
+@keyframes letter-turn-back {
+  0% { opacity: 0.2; transform: rotate(-0.8deg) translateX(60px) rotateY(-18deg); }
+  100% { opacity: 1; transform: rotate(-0.8deg); }
+}
+
+.letter-title {
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-bottom: 18px;
+  color: #3b1f12;
+}
+
+.letter-body p {
+  margin: 0 0 18px;
+  font-size: 31px;
+  line-height: 1.75;
+  text-align: justify;
+}
+
+.letter-sign {
+  margin-top: 26px;
+  font-size: 38px;
+  font-weight: 700;
+  text-align: left;
+  padding-left: 40px;
+}
+
+.letter-page {
+  position: absolute;
+  bottom: 22px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 26px;
+  color: rgba(42, 29, 18, 0.65);
+}
+
+/* Game UI under the paper: the keys for what this page talks about. */
+.letter-tip {
+  margin: 22px auto 0;
+  width: fit-content;
+  max-width: 1100px;
+  padding: 10px 28px;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 25px;
+  font-weight: 600;
+  color: #f6e7b8;
+  background: rgba(20, 16, 10, 0.85);
+  border: 2px solid rgba(255, 210, 74, 0.55);
+  border-radius: 10px;
+}
+
+.letter-keys {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  margin-top: 14px;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 22px;
+  color: rgba(240, 230, 200, 0.75);
+}

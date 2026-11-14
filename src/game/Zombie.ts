@@ -20,7 +20,12 @@ import type { Player } from './Player';
  *  - Screamer (Zombie Woman) : lookout turning around on a fixed rhythm ("?" warns before each turn),
  *                              turns toward noises, sees through line of sight only. If she sees you, a
  *                              bottle hits her or you punch her from the front, she screams: Clickers
- *                              come to her, Runners start chasing. Silent takedown from behind only.
+ *                              come to her, Runners start chasing, and her FIRST scream of each alert
+ *                              brings SCREAM_SUMMONS fresh Runners sprinting in from off-screen (the scene
+ *                              spawns them). Silent takedown from behind only.
+ *
+ * Icons over heads: "?" = searching / suspicious, red "!!" = it found you, pulsing gold "!" = a Clicker
+ * busy with a distraction: the only moment it can be taken down (from behind).
  */
 export enum ZombieKind {
   Clicker,
@@ -97,6 +102,11 @@ const ARRIVE = 0.25; // tiles: close enough to a target x
 const CONTACT_INSET = 6; // px: contact needs real overlap, not a grazing touch
 const TURN_WARNING = 0.7; // s before a Screamer turns around: "?" telegraph
 const PUNCH_KEEPS_DIZZY = 0.6; // s: a punch never lets the dizzy window end right after it
+export const SCREAM_SUMMONS = 2; // Runners called in by each alert's first scream
+const ICON_ALERT = '!!'; // found you
+const ICON_COLOR = '#f0e6c8';
+const ICON_ALERT_COLOR = '#ff5a48';
+const ICON_TAKEDOWN_COLOR = '#ffd24a';
 
 export type MeleeResult = 'none' | 'hit' | 'takedown' | 'grab';
 
@@ -109,6 +119,7 @@ export class Zombie {
   health: number;
   distracted = false; // Clicker: busy with a bottle / scream (the only time it can be taken down)
   hasKey = false; // guardian: drops the key of a locked door when it dies (the scene drops it)
+  summons = 0; // Screamer: Runners her scream just called in (the scene spawns them and resets this)
 
   private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
   private readonly sprite: Phaser.GameObjects.Sprite;
@@ -122,6 +133,8 @@ export class Zombie {
   private lookTimer = 0; // Screamer look cycle / Clicker search turns
   private alertTimer = 0;
   private iconTimer = 0;
+  private iconText = '';
+  private summoned = false; // Screamer: this alert already called its Runners
   private restartAnim = false;
 
   constructor(scene: Phaser.Scene, kind: ZombieKind, feetX: number, feetY: number, dir: number, patrols: boolean) {
@@ -171,6 +184,12 @@ export class Zombie {
     return this.state !== ZombieState.Dead;
   }
 
+  /** Clicker busy with a bottle / scream: the only time it can be taken down (from behind). */
+  get takedownWindow(): boolean {
+    return this.kind === ZombieKind.Clicker && this.distracted
+      && (this.state === ZombieState.Investigate || this.state === ZombieState.Search);
+  }
+
   /** Can catch the player right now. */
   get dangerous(): boolean {
     return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Grab;
@@ -217,8 +236,7 @@ export class Zombie {
       return 'hit';
     }
     if (this.kind === ZombieKind.Clicker) {
-      const busy = this.distracted && (this.state === ZombieState.Investigate || this.state === ZombieState.Search);
-      if (busy && fromBehind) {
+      if (this.takedownWindow && fromBehind) {
         this.die();
         return 'takedown';
       }
@@ -252,8 +270,13 @@ export class Zombie {
     this.sprite.setPosition(this.feetX, this.feetY);
     this.sprite.setFlipX(this.dir < 0);
     const headY = this.feetY - this.body.height;
-    this.icon.setPosition(this.feetX, headY - 6);
-    this.icon.setVisible(this.iconTimer > 0 && this.alive);
+    // The takedown window overrides the timed icons with a pulsing gold "!".
+    const takedown = this.takedownWindow;
+    const text = takedown ? '!' : this.iconText;
+    if (this.icon.text !== text) this.icon.setText(text).setColor(text === '!' ? ICON_TAKEDOWN_COLOR : text === ICON_ALERT ? ICON_ALERT_COLOR : ICON_COLOR);
+    this.icon.setPosition(this.feetX, headY - 6 + (takedown ? Math.sin(timeMs / 200) * 6 : 0));
+    this.icon.setScale(takedown ? 1 + Math.sin(timeMs / 140) * 0.1 : 1);
+    this.icon.setVisible(this.alive && (takedown || this.iconTimer > 0));
 
     this.fx.clear();
     if (this.state === ZombieState.Stunned) { // three stars orbiting the head
@@ -299,9 +322,9 @@ export class Zombie {
       this.targetX = lure.x;
       this.state = ZombieState.Investigate;
       this.distracted = true;
-      this.showIcon('!', 0.8);
+      this.showIcon('', 0); // the takedown "!" takes over
     } else if (steps || sensed) { // your footsteps, or you are right next to it: hunt you
-      if (this.state !== ZombieState.Hunt) this.showIcon('!', 0.8);
+      if (this.state !== ZombieState.Hunt) this.showIcon(ICON_ALERT, 0.8);
       this.state = ZombieState.Hunt;
       this.distracted = false;
       this.targetX = steps ? steps.x : player.feetX;
@@ -376,16 +399,16 @@ export class Zombie {
         this.state = ZombieState.Chase;
         this.targetX = player.feetX;
         this.timer = T.runnerLoseTime;
-        this.showIcon('!', 0.8);
+        this.showIcon(ICON_ALERT, 0.8);
       }
       return;
     }
 
     const scream = this.lastHeard(noise, true, true);
     if (scream && this.state !== ZombieState.Chase) {
-      this.startChase(scream.x);
+      this.chase(scream.x);
     } else if (this.state !== ZombieState.Chase && this.runnerSees(player, true)) {
-      this.startChase(player.feetX);
+      this.chase(player.feetX);
     }
 
     switch (this.state) {
@@ -430,8 +453,9 @@ export class Zombie {
     }
   }
 
-  private startChase(x: number): void {
-    this.showIcon('!', 0.8);
+  /** Runner: run after x (seen player, scream, or summoned by a Screamer). */
+  chase(x: number): void {
+    this.showIcon(ICON_ALERT, 0.8);
     this.state = ZombieState.Chase;
     this.targetX = x;
     this.timer = T.runnerLoseTime;
@@ -465,12 +489,17 @@ export class Zombie {
       if (this.timer <= 0) {
         noise.emit(this.feetX, this.feetY - this.body.height * 0.8, T.screamNoise, NoiseKind.Scream);
         this.timer = T.screamInterval;
-        this.showIcon('!', 0.8);
+        this.showIcon(ICON_ALERT, 0.8);
+        if (!this.summoned) { // the first scream of this alert calls Runners in
+          this.summoned = true;
+          this.summons = SCREAM_SUMMONS;
+        }
       }
       return;
     }
     if (this.state === ZombieState.Alert) {
       this.state = ZombieState.Post;
+      this.summoned = false; // lost you: the next alert calls Runners again
       this.lookTimer = T.screamerLookTime;
     }
 
@@ -595,7 +624,7 @@ export class Zombie {
   }
 
   private showIcon(text: string, seconds: number): void {
-    this.icon.setText(text);
+    this.iconText = text;
     this.iconTimer = seconds;
   }
 
@@ -636,8 +665,10 @@ export class ZombieDebug {
   private readonly folder: GUI;
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly labels: Phaser.GameObjects.Text[] = [];
+  private readonly scene: Phaser.Scene;
 
   constructor(scene: Phaser.Scene, zombies: Zombie[]) {
+    this.scene = scene;
     this.zombies = zombies;
     const t = new TuningFolder('zombie tuning', T);
     t.add('clickerSpeed', 0, 6, 0.1);
@@ -667,11 +698,6 @@ export class ZombieDebug {
     this.folder = debug.gui.addFolder('zombies').close();
     this.folder.add(this, 'showSenses').name('show senses + states');
     this.gfx = scene.add.graphics().setDepth(20);
-    for (let i = 0; i < zombies.length; i++) {
-      this.labels.push(scene.add.text(0, 0, '', {
-        fontFamily: 'Consolas, monospace', fontSize: '18px', color: '#ffffff', backgroundColor: '#00000088',
-      }).setOrigin(0.5, 0).setDepth(21));
-    }
   }
 
   destroy(): void {
@@ -682,6 +708,11 @@ export class ZombieDebug {
   draw(player: Player): void {
     const g = this.gfx;
     g.clear();
+    while (this.labels.length < this.zombies.length) { // zombies can be spawned later (summoned Runners)
+      this.labels.push(this.scene.add.text(0, 0, '', {
+        fontFamily: 'Consolas, monospace', fontSize: '18px', color: '#ffffff', backgroundColor: '#00000088',
+      }).setOrigin(0.5, 0).setDepth(21));
+    }
     for (let i = 0; i < this.zombies.length; i++) {
       const z = this.zombies[i];
       const label = this.labels[i];

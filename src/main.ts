@@ -8,6 +8,7 @@ import { DemoScene } from './game/DemoScene';
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
+  dom: { createContainer: true }, // HTML over the canvas, scaled with it (the father's letter)
   width: 1920,
   height: 1080,
   backgroundColor: '#3b3a2c',

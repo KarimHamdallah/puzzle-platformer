@@ -4,6 +4,7 @@ import { Action, InputActions } from '../core/InputActions';
 import { createAnimations, loadAssets } from './Assets';
 import { CameraRig } from './CameraRig';
 import { ART_SCALE, TILE } from './constants';
+import { Letter } from './Letter';
 import { Locks } from './Locks';
 import { NoiseKind, NoiseSystem } from './Noise';
 import { Player } from './Player';
@@ -17,7 +18,7 @@ import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 //   C  Clicker (post)        c  Clicker (patrols)     R  Runner            S  Screamer (faces left)
 //   x  bottle stash          B  cover crate (crouch behind it to hide)
 //   D  locked door (bottom tile, 3 tiles tall; its key is carried by a KEY_GUARDIANS zombie)
-//   b  box (decor)           o  stone (decor)
+//   b  box (decor)           o  stone (decor)        L  the father's letter (dead man against the wall to his right)
 const MAP: string[] = [
   '#......................................................................................................................................................................................................#',
   '#......................................................................................................................................................................................................#',
@@ -31,20 +32,20 @@ const MAP: string[] = [
   '#......................................................................................................................................................................................................#',
   '#......................................................................................................................................................................................................#',
   '#......................................................................................................................................................................................................#',
-  '#......................................................................................................................................................................................................#',
-  '#.......................................................................................................................................................................................##############.#',
-  '#...................................................................................#.........#####################################.....................................................##############.#',
-  '#...................................................................................#..................................................................................................................#',
-  '#...................................................................................#..................................................................................................................#',
-  '#...................................................................................#.....................B.....C........B........D...K....................x.K..B....B.R..B...B.....x.B....B....S...DE.#',
-  '#...................................................................................#......x..#########################################################..#######################..####################.#',
-  '#...................................................................................#.....###.....................................#....................................................................#',
-  '#...................................................................................#.............................................#....................................................................#',
+  '#.................#....................................................................................................................................................................................#',
+  '#.................#.....................................................................................................................................................................##############.#',
+  '#.................#.................................................................#.........#####################################.....................................................##############.#',
+  '#.................#.................................................................#..................................................................................................................#',
+  '#.................#.................................................................#..................................................................................................................#',
+  '#................L#.................................................................#.....................B.....C........B........D...K....................x.K..B....B.R..B...B.....x.B....B....S...DE.#',
+  '#.............#####.................................................................#......x..#########################################################..#######################..####################.#',
+  '#.................#.................................................................#.....###.....................................#....................................................................#',
+  '#........##.......#.................................................................#.............................................#....................................................................#',
   '#............######################.................................................#................B........c.......B...........#....................................................................#',
   '#............######################.....................x...........................#.....#########################################....................................................................#',
-  '#......................................................###.............................................................................................................................................#',
+  '#.....##...............................................###.............................................................................................................................................#',
   '#......................................................###..........##.................##..............................................................................................................#',
-  '#..P..x..B.......B.....C....B....D..K.x.....B...#...B..###...R..B...##....B....x....D....K.........B.....c............B..........................x....c.....................B...........c..............#',
+  '#..Px....B.......B.......C..B....D..K.x.....B...#...B..###...R..B...##....B....x....D....K.........B.....c............B..........................x....c.....................B...........c..............#',
   '########################################################################################################################################################################################################',
   '########################################################################################################################################################################################################',
   '########################################################################################################################################################################################################',
@@ -59,13 +60,17 @@ const MAP_H = MAP.length;
  * ends its section, so no section can be skipped: lure / take down / stomp + punch to get through.
  */
 const KEY_GUARDIANS: [number, number][] = [
-  [23, 25], // A: the tunnel Clicker            -> door at the tunnel exit
+  [25, 25], // A: the tunnel Clicker            -> door at the tunnel exit
   [61, 25], // B: the yard Runner               -> door in the yard's wall
   [112, 17], // C: the top-floor Clicker        -> door out onto the rooftops
   [192, 17], // D: the Screamer                 -> door to the exit
 ];
 const RESTART_DELAY = 700; // ms between being caught and the level restarting
 const STOMP_DEPTH = 22; // px: how far into a Runner's head the feet may be and still count as a stomp
+const SUMMON_MARGIN = 2; // tiles past the screen edge where summoned Runners appear
+const SUMMON_SPACING = 2; // tiles between them
+const SUMMON_SEARCH = 30; // tiles searched outward for a floor on the player's level
+const SUMMON_MAX = 4; // summoned Runners alive at once
 const STOMP_NOISE = 4; // tiles
 const CHECKPOINT_OFF = 0x8a8a7a;
 const CHECKPOINT_ON = 0xffa640;
@@ -100,6 +105,14 @@ function isSolid(x: number, y: number): boolean {
   return MAP[y][x] === '#';
 }
 
+/** First floor row at or below fromRow in column x with 2 free tiles above it, or -1. */
+function floorUnder(x: number, fromRow: number): number {
+  for (let y = Math.max(2, fromRow); y < MAP_H; y++) {
+    if (isSolid(x, y) && !isSolid(x, y - 1) && !isSolid(x, y - 2)) return y;
+  }
+  return -1;
+}
+
 /**
  * Demo level. Frame order (like a C++ main loop):
  *   1. physics steps at 60 Hz -> fixedUpdate(dt): noise, player, bottles, zombies, contacts
@@ -113,6 +126,9 @@ export class DemoScene extends Phaser.Scene {
   private noise!: NoiseSystem;
   private throwables!: Throwables;
   private locks!: Locks;
+  private solids!: Phaser.Physics.Arcade.StaticGroup;
+  private letter: Letter | null = null;
+  private summoned: Zombie[] = []; // Runners called in by Screamers
   private world!: Phaser.Physics.Arcade.World;
   private hudCount!: Phaser.GameObjects.Text;
   private hudKeys!: Phaser.GameObjects.Text;
@@ -151,6 +167,8 @@ export class DemoScene extends Phaser.Scene {
     this.checkpoints = [];
     this.exit = null;
     this.zombieDebug = null;
+    this.letter = null;
+    this.summoned = [];
     this.restarting = false;
     this.deathHandled = false;
     this.finished = false;
@@ -166,6 +184,7 @@ export class DemoScene extends Phaser.Scene {
 
     this.createParallax();
     const solids = this.createLevel();
+    this.solids = solids;
     this.controls = new InputActions();
     this.noise = new NoiseSystem(this);
     this.throwables = new Throwables(this, this.startBottles);
@@ -188,6 +207,10 @@ export class DemoScene extends Phaser.Scene {
 
   update(time: number, deltaMs: number): void {
     this.controls.update();
+    if (this.letter) {
+      this.letter.update(time, this.player);
+      if (this.letter.open) return; // reading: the world is paused (Letter pauses physics)
+    }
     if (this.controls.pressed(Action.Reset)) this.restartLevel();
 
     this.player.update(deltaMs);
@@ -213,6 +236,10 @@ export class DemoScene extends Phaser.Scene {
       if (z.hasKey && !z.alive) { // a guardian died: its key drops
         z.hasKey = false;
         this.locks.dropKey(z.feetX, z.feetY);
+      }
+      if (z.summons > 0) { // a Screamer's first scream
+        this.summonRunners(z, z.summons);
+        z.summons = 0;
       }
     }
     this.locks.fixedUpdate(dt, this.player.body);
@@ -251,6 +278,33 @@ export class DemoScene extends Phaser.Scene {
       z.grab();
       p.kill();
       return;
+    }
+  }
+
+  /**
+   * A Screamer's scream calls Runners: they come sprinting in from beyond the screen edge behind the
+   * player (the way you came, so running back is no escape), already chasing. Hide or fight.
+   */
+  private summonRunners(screamer: Zombie, count: number): void {
+    const p = this.player;
+    const side = p.feetX < screamer.feetX ? -1 : 1;
+    const floorRow = Math.round(p.feetY / TILE); // the row the player stands on: Runners arrive on the same level
+    const view = this.cameras.main.worldView;
+    const edge = side < 0 ? view.left : view.right;
+    let tx = Math.floor(edge / TILE) + side * SUMMON_MARGIN; // just past the screen edge
+    let alive = 0;
+    for (let i = 0; i < this.summoned.length; i++) if (this.summoned[i].alive) alive++;
+    count = Math.min(count, SUMMON_MAX - alive);
+    let spawned = 0;
+    for (let tries = 0; spawned < count && tries < SUMMON_SEARCH; tries++, tx += side) {
+      if (tx < 1 || tx > MAP_W - 2 || floorUnder(tx, floorRow - 3) !== floorRow) continue; // gaps, walls, other floors
+      const z = new Zombie(this, ZombieKind.Runner, (tx + 0.5) * TILE, floorRow * TILE, -side, true);
+      spawned++;
+      tx += side * (SUMMON_SPACING - 1);
+      this.physics.add.collider(z.body, this.solids);
+      z.chase(p.feetX);
+      this.zombies.push(z); // the same array the player, the bottles and the debug view read
+      this.summoned.push(z);
     }
   }
 
@@ -433,6 +487,9 @@ export class DemoScene extends Phaser.Scene {
             break;
           case 'B':
             this.addCoverCrate(feetX, feetY);
+            break;
+          case 'L':
+            this.letter = new Letter(this, this.controls, (x + 1) * TILE, feetY);
             break;
           case 'b':
             this.add.image(feetX, feetY, x % 2 === 0 ? 'box1' : 'box2').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);

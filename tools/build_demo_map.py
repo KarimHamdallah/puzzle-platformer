@@ -40,11 +40,21 @@ fill(1, GROUND, W - 2, H - 1)
 # tiles away. Hide behind a crate while it hunts past you, or lure it with a LOW throw (the ceiling)
 # and take it down from behind while it listens.
 put(3, 25, 'P')
-put(6, 25, 'x')                 # stash before the tunnel
+put(4, 25, 'x')                 # stash before the tunnel
 put(9, 25, 'B')                 # practice crate (toggle crouch behind it)
 fill(13, 21, 34, 22)            # tunnel roof: interior rows 23..25 = 3 tiles (covers the door too)
+# THE FATHER'S LETTER, above the tunnel: a short climb (3-tile jumps, 1-2 tile gaps) to a dead man
+# sitting against a ruined wall. His letter is the game's guide. The wall (top row 12, out of reach
+# from the ledge) stops anyone walking along the roof past door 1. Everything up here is more than 8
+# tiles from the tunnel Clicker: walking on the roof is not heard.
+fill(6, 23, 7, 23)              # ledge 1 (ground 26 -> 23); walking under it on the ground still fits
+fill(9, 20, 10, 20)             # ledge 2 (23 -> 20, 1-tile gap)
+#                                 ledge 2 -> tunnel roof (21): 2-tile gap, 1 down
+fill(14, 18, 17, 18)            # the father's ledge (roof 21 -> 18, jump from the roof's left end)
+fill(18, 12, 18, 20)            # ruined wall on the roof
+put(17, 17, 'L')                # the father, his back against the wall
 put(17, 25, 'B')
-put(23, 25, 'C')                # Clicker at its post in the tunnel, facing left; carries key 1
+put(25, 25, 'C')                # Clicker at its post in the tunnel, facing left; carries key 1
 put(28, 25, 'B')
 put(33, 25, 'D')                # locked door 1 at the tunnel exit
 put(36, 25, 'K')

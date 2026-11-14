@@ -53,6 +53,16 @@ PALETTE = {
     'd': (54, 51, 46),     # door steel shade
     'U': (110, 72, 50),    # rust
     'V': (122, 118, 106),  # door highlight / rivet
+    'F': (84, 88, 60),     # the father's field jacket
+    'f': (60, 63, 43),     # jacket shade
+    'X': (150, 141, 118),  # dead skin
+    'x': (111, 103, 87),   # dead skin shade
+    'Z': (92, 40, 34),     # beanie
+    'z': (66, 28, 25),     # beanie shade
+    'M': (226, 214, 180),  # paper
+    'm': (176, 162, 128),  # paper shade / ink
+    'b': (84, 26, 22),     # dried blood
+    'C': (140, 140, 132),  # grey hair / beard
 }
 
 
@@ -363,6 +373,53 @@ def draw_door_sprite():
     return c.image().crop((0, 0, 32, 96))
 
 
+def draw_corpse_sprite():
+    """The father: dead, sitting with his back against a wall (wall on the RIGHT), facing left toward
+    whoever comes. Head slumped on his chest, one knee up, the letter for his son in his lap, a dried
+    wound in his side. 44x32 px, feet on the bottom row."""
+    c = Canvas()
+    gy = 95                                      # ground row
+    # far arm (behind the body): hangs down, hand on the ground
+    c.stroke((57, 76), (60, 86), 3, 'f')
+    c.stroke((60, 86), (61, 92), 2, 'x')
+    c.rect(60, 92, 62, 93, 'x')
+    # far leg: knee up
+    c.stroke((52, 89), (43, 80), 4, 'j')
+    c.stroke((43, 80), (37, 90), 4, 'j')
+    c.rect(32, 90, 38, 93, 'o'); c.row(94, 31, 38, 'o')
+    # torso, leaning back against the wall
+    c.stroke((54, 88), (56, 75), 10, 'F')
+    c.rect(59, 72, 60, 91, 'f')                  # back shade (against the wall)
+    c.rect(50, 81, 53, 86, 'b')                  # the wound: dried blood soaking the jacket
+    c.put(52, 87, 'b'); c.put(51, 80, 'b')
+    c.row(91, 49, 60, 'L')                       # belt
+    # near leg: stretched out flat along the ground, boot toe up
+    c.stroke((54, 91), (33, 92), 5, 'J')
+    c.stroke((50, 90), (36, 91), 1, 'I')
+    c.rect(28, 88, 32, 94, 'O'); c.row(gy - 1, 27, 33, 'o'); c.rect(28, 86, 29, 88, 'O')
+    # head slumped forward onto the chest, facing left/down
+    hx, hy = 46, 68
+    c.rect(hx, hy, hx + 7, hy + 7, 'X')          # face / skull
+    c.rect(hx + 5, hy, hx + 7, hy + 7, 'x')      # far side shade
+    c.rect(hx - 1, hy - 2, hx + 8, hy + 1, 'Z')  # beanie
+    c.row(hy + 1, hx - 1, hx + 8, 'z')
+    c.row(hy + 3, hx, hx + 1, 'x'); c.row(hy + 3, hx + 3, hx + 4, 'x')   # closed eyes
+    c.rect(hx - 1, hy + 5, hx + 4, hy + 8, 'C')  # grey beard on the chest
+    c.put(hx, hy + 8, 'C'); c.put(hx + 2, hy + 9, 'C')
+    # near arm: limp, the hand resting in the lap on the letter
+    c.stroke((53, 74), (49, 82), 3, 'F')
+    c.stroke((49, 82), (44, 86), 2, 'X')
+    c.rect(37, 85, 44, 90, 'M')                  # the letter, folded
+    c.row(90, 37, 44, 'm')
+    c.row(86, 38, 42, 'm'); c.row(88, 38, 41, 'm')            # ink lines
+    c.rect(43, 85, 45, 87, 'X')                  # fingers over it
+    c.outline()
+    for x in range(34, 66):                      # old blood dried on the ground (after the outline: flat)
+        if (x * 7) % 5 != 0 and c.px[gy][x] is None:
+            c.px[gy][x] = 'b'
+    return c.image().crop((24, 64, 68, 96))   # 44x32
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -396,6 +453,13 @@ def main():
     draw_stash_sprite().save(os.path.join(out_dir, 'stash.png'))
     draw_key_sprite().save(os.path.join(out_dir, 'key.png'))
     draw_door_sprite().save(os.path.join(out_dir, 'door.png'))
+    draw_corpse_sprite().save(os.path.join(out_dir, 'corpse.png'))
+    if preview_dir:
+        os.makedirs(preview_dir, exist_ok=True)
+        corpse = draw_corpse_sprite()
+        bg = Image.new('RGBA', corpse.size, (120, 128, 100, 255))
+        bg.alpha_composite(corpse)
+        bg.resize((corpse.width * 8, corpse.height * 8), Image.NEAREST).save(os.path.join(preview_dir, 'corpse_preview.png'))
 
     if preview_dir:  # contact sheet: every animation on its own row, 3x zoom, cropped to the body
         os.makedirs(preview_dir, exist_ok=True)

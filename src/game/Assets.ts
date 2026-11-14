@@ -49,6 +49,7 @@ const IMAGES: [string, string][] = [
   ['stash', 'assets/player/stash.png'],
   ['key', 'assets/player/key.png'],
   ['door', 'assets/player/door.png'],
+  ['corpse', 'assets/player/corpse.png'],
   ['bg_sky', 'assets/craftpix/bg/sky.png'],
   ['bg_far', 'assets/craftpix/bg/far.png'],
   ['bg_mid', 'assets/craftpix/bg/mid.png'],
