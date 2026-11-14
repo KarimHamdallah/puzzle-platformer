@@ -45,6 +45,7 @@ export interface SniperDef {
   area: [number, number]; // tile x range where he can spot and shoot the player
   zones: SniperZone[];
   mad?: boolean; // rifle: random reload (MAD_RELOAD_MIN..MAX, listen for the bolt), sometimes a double shot
+  blind?: [number, number, number, number][]; // tile rects x0, y0, x1, y1 he can't see (right under his nest)
 }
 
 enum State {
@@ -135,7 +136,8 @@ export class Sniper {
 
   private rifle(dt: number): void {
     const p = this.player;
-    const inArea = !p.dead && !p.invisible && this.playerInArea(); // invisible (cheat): he can't find you
+    // invisible (cheat) or in a blind spot (right under his nest): he can't find you
+    const inArea = !p.dead && !p.invisible && this.playerInArea() && !this.inBlindSpot();
     switch (this.state) {
       case State.Idle:
         this.wander(dt);
@@ -299,6 +301,19 @@ export class Sniper {
    */
   private headY(): number {
     return this.player.body.top + HEAD_INSET * TILE;
+  }
+
+  /** The player is somewhere he can't see: right under his nest, he can't lean out that far. */
+  private inBlindSpot(): boolean {
+    const spots = this.def.blind;
+    if (!spots) return false;
+    const x = this.player.body.center.x / TILE;
+    const y = this.player.body.center.y / TILE;
+    for (let i = 0; i < spots.length; i++) {
+      const b = spots[i];
+      if (x > b[0] && x < b[2] && y > b[1] && y < b[3]) return true;
+    }
+    return false;
   }
 
   private playerInArea(): boolean {

@@ -378,6 +378,7 @@ export const LEVELS: LevelData[] = [
           { x0: 21, y0: 15, x1: 62, y1: 19, weight: 0.1 },
         ],
         mad: true,
+        blind: [[59.5, 12, 63, 16.3]], // the grenade ledge, right under his nest: time to open the crate
       },
       {
         kind: SniperKind.Gunner,

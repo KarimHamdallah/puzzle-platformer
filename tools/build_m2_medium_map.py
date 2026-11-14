@@ -58,7 +58,8 @@ put(47, 25, 'Q')
 for x0 in (21, 28, 35, 42, 49, 56):
     fill(x0, 19, x0 + 3, 19, 'Z')
     put(x0 + 1, 18, 'W')
-fill(60, 16, 62, 16, 'Z')          # the ledge under the tower (from the last segment: 3 up)...
+fill(60, 16, 62, 16, 'Z')          # the ledge under the tower (from the last segment: 3 up), a blind spot
+#                                   (right under his nest he can't see you: SniperDef.blind)...
 put(61, 15, 'Y')                  # ...with the army ammo crate: the smoke grenades
 fill(63, 7, 68, 22)               # the tower; doorway rows 23..25. The mad sniper's nest on top.
 put(71, 25, 'K')
