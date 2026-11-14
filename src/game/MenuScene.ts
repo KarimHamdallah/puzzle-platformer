@@ -26,6 +26,8 @@ interface MenuSection {
 
 const THUMB_M1_EASY = 'thumb_m1_easy';
 const THUMB_M1_EASY_PATH = 'assets/thumbs/mechanic1_easy.png';
+const THUMB_M1_MEDIUM = 'thumb_m1_medium';
+const THUMB_M1_MEDIUM_PATH = 'assets/thumbs/mechanic1_medium.png';
 
 const SECTIONS: MenuSection[] = [
   {
@@ -40,7 +42,7 @@ const SECTIONS: MenuSection[] = [
     subheading: 'Clickers hear but cannot see. Throw bottles to lure them, sneak, hide behind crates, strike from behind.',
     levels: [
       { scene: 'Level', level: 0, label: 'EASY', title: 'The Long Way Out', blurb: 'Tunnel, yard, a building, the rooftops.', thumb: THUMB_M1_EASY },
-      { scene: 'Level', level: 1, label: 'MEDIUM', title: 'The Horde', blurb: 'Too many to sneak past. A car leaks gasoline...', thumb: '' },
+      { scene: 'Level', level: 1, label: 'MEDIUM', title: 'The Horde', blurb: 'Too many to sneak past. A car leaks gasoline...', thumb: THUMB_M1_MEDIUM },
       { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Locked: the difficulty design comes first.', thumb: '' },
     ],
   },
@@ -83,7 +85,8 @@ export class MenuScene extends Phaser.Scene {
 
   preload(): void {
     loadAssets(this);
-    this.load.image(THUMB_M1_EASY, THUMB_M1_EASY_PATH); // optional: a drawn thumbnail replaces it if missing
+    this.load.image(THUMB_M1_EASY, THUMB_M1_EASY_PATH); // optional: a background crop replaces a missing one
+    this.load.image(THUMB_M1_MEDIUM, THUMB_M1_MEDIUM_PATH);
   }
 
   create(): void {
