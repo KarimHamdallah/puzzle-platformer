@@ -597,7 +597,7 @@ class PlayerDebug {
   vy = 0;
   corrections = 0;
   showHitboxes = false;
-  showTrail = true;
+  showTrail = false;
   infiniteBottles = false;
   timeScale = 1;
 
@@ -669,7 +669,7 @@ class PlayerDebug {
     f.add(player, 'respawn').name('respawn');
     this.folder = f;
 
-    this.trail = scene.add.graphics();
+    this.trail = scene.add.graphics().setVisible(this.showTrail);
     this.label = scene.add.text(0, 0, '', {
       fontFamily: 'Consolas, monospace',
       fontSize: '22px',
