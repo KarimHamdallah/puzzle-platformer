@@ -29,7 +29,7 @@ const THUMB_M1_EASY_PATH = 'assets/thumbs/mechanic1_easy.png';
 const SECTIONS: MenuSection[] = [
   {
     heading: 'DAY 1  -  MOVEMENT',
-    subheading: 'The greybox room the controller was tuned in: jump height, coyote time, corner correction, camera.',
+    subheading: 'The very first test: the greybox room and the cube the movement was tuned with on Day 1.',
     levels: [
       { scene: 'Playground', label: 'TEST ROOM', title: 'Movement Test Room', blurb: 'No enemies. Just run, jump and get the feel.', thumb: '' },
     ],
@@ -207,7 +207,7 @@ export class MenuScene extends Phaser.Scene {
       const s = SOLIDS[i];
       g.fillRect(ox + s.x * scale, oy + s.y * scale, s.w * scale, s.h * scale);
     }
-    g.fillStyle(0xffffff, 1).fillRect(ox + 3.2 * scale, oy + 19.2 * scale, 0.6 * scale, 1.8 * scale); // the player
+    g.fillStyle(0xffffff, 1).fillRect(ox + 3.125 * scale, oy + 20.125 * scale, 0.75 * scale, 0.875 * scale); // the cube
     return g;
   }
 
