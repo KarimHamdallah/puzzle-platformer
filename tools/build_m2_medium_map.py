@@ -7,12 +7,16 @@ TypeScript array to paste into src/game/Levels.ts (M2_MEDIUM_MAP).
   area 2, the machine gun (x 69..123): open ground and nothing to draw his fire. Seeing it (x 84), the
      player remembers an army ammo crate under the tower.
   The smoke grenades are on a scaffold ledge under the tower (Y), reachable only from the scaffolding
-  route, which starts back at the beginning of area 1. So area 1 is crossed THREE times:
+  route: from the start of area 1, or, once the gun has been seen, from the rubble halfway. So area 1
+  is crossed THREE times:
      1. forward on the lower path (each crate he hits is cracked),
      2. back on the lower path (the cracked crates break: concrete and the crates you saved matter),
-     3. forward on the scaffolding (fresh crates on every segment) to the ledge, then down to the tower
-        doorway and on to area 2, where a smoke cloud blinds the gunner.
-  A death restores the crates (fair retries); the stolen smoke and what you've seen are kept.
+     3. up the RUBBLE: once the gun has been seen, a wall section has collapsed halfway through area 1
+        (LevelData.rubble, x 32..34): 2-tile stone steps up onto the scaffolding. Forward on the
+        scaffolding (fresh crates on every segment) to the ledge, down to the tower doorway, on to
+        area 2, where a smoke cloud blinds the gunner.
+  Broken and cracked crates stay that way, even after a death; the stolen smoke and what you've seen
+  are kept too.
 
 Legend (on top of the others): W = big wooden crate (breaks in M2 Medium), Q = concrete block (never
 breaks), Y = the army ammo crate with the smoke grenades.

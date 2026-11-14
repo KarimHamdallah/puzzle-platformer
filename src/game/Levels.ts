@@ -50,6 +50,7 @@ export class LevelProgress {
   sawGunner = false; // M2 Medium: has seen the machine gun's ground (the ammo crate now matters)
   cacheLooted = false;
   smokes = 0; // smoke grenades in hand
+  crateHp: number[] = []; // M2 Medium: each breakable crate's hits left (by spawn order); damage survives a death
 }
 
 export interface LevelData {
@@ -67,6 +68,7 @@ export interface LevelData {
   snipers: SniperDef[]; // Mechanic 2: soldiers on towers and roofs
   breakableCrates: boolean; // big wooden crates ('W') break after CRATE_HP hits
   gunnerSeenAt: number; // tile x: walking past it the player sees the machine gun (smoke quest), 0 = none
+  rubble: [number, number][]; // stone tiles that appear once the machine gun has been seen (a wall collapsed)
 }
 
 const HARD_INTRO = [
@@ -277,6 +279,7 @@ export const LEVELS: LevelData[] = [
     snipers: [],
     breakableCrates: false,
     gunnerSeenAt: 0,
+    rubble: [],
   },
   { // Mechanic 1, Medium: the horde and the Molotov
     map: MEDIUM_MAP,
@@ -297,6 +300,7 @@ export const LEVELS: LevelData[] = [
     snipers: [],
     breakableCrates: false,
     gunnerSeenAt: 0,
+    rubble: [],
   },
   { // Mechanic 1, Hard: night. Listen Mode, one-bottle stashes, thunder
     map: HARD_MAP,
@@ -317,6 +321,7 @@ export const LEVELS: LevelData[] = [
     snipers: [],
     breakableCrates: false,
     gunnerSeenAt: 0,
+    rubble: [],
   },
   { // Mechanic 2, Easy: the tower sniper, then the machine gun
     map: M2_EASY_MAP,
@@ -349,6 +354,7 @@ export const LEVELS: LevelData[] = [
     ],
     breakableCrates: false,
     gunnerSeenAt: 0,
+    rubble: [],
   },
   { // Mechanic 2, Medium: the mad sniper, cover that breaks, smoke stolen from the army
     map: M2_MEDIUM_MAP,
@@ -382,5 +388,12 @@ export const LEVELS: LevelData[] = [
     ],
     breakableCrates: true,
     gunnerSeenAt: 84,
+    // On the way back: a wall section collapsed in the shooting; its rubble makes 2-tile steps from the
+    // ground (26) up to the scaffolding (segment 35..38, row 19) halfway through area 1.
+    rubble: [
+      [32, 24], [32, 25],
+      [33, 22], [33, 23], [33, 24], [33, 25],
+      [34, 20], [34, 21], [34, 22], [34, 23], [34, 24], [34, 25],
+    ],
   },
 ];

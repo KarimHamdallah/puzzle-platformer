@@ -24,6 +24,7 @@ let LEVEL: LevelData = LEVELS[0];
 let MAP: string[] = LEVEL.map;
 let MAP_W = MAP[0].length;
 let MAP_H = MAP.length;
+const EXTRA_STONE = new Set<number>(); // y * MAP_W + x: stone added while playing (rubble), on top of MAP
 
 const RESTART_DELAY = 700; // ms between being caught and the level restarting
 const STOMP_DEPTH = 22; // px: how far into a Runner's head the feet may be and still count as a stomp
@@ -76,13 +77,13 @@ const PARALLAX: [string, number][] = [
 function isSolid(x: number, y: number): boolean {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true; // outside the map counts as wall
   const c = MAP[y][x];
-  return c === '#' || c === 'Z';
+  return c === '#' || c === 'Z' || EXTRA_STONE.has(y * MAP_W + x);
 }
 
 /** Stone only: what the tileset draws and what stops a sniper's line of fire (scaffolding doesn't). */
 function isStone(x: number, y: number): boolean {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true;
-  return MAP[y][x] === '#';
+  return MAP[y][x] === '#' || EXTRA_STONE.has(y * MAP_W + x);
 }
 
 /** Keys the door at tile (x, y) takes. */
@@ -144,6 +145,9 @@ export class LevelScene extends Phaser.Scene {
   private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
   private hudSmoke: Phaser.GameObjects.Image | null = null;
   private hudSmokeCount: Phaser.GameObjects.Text | null = null;
+  private groundLayer!: Phaser.Tilemaps.TilemapLayer;
+  private grassLayer!: Phaser.Tilemaps.TilemapLayer;
+  private rubbleShown = false;
   private cheating = false; // Hard's cheat key: unlimited bottles + invisible + every door open
   private bottlesBeforeCheat = 0;
   private cheatText: Phaser.GameObjects.Text | null = null;
@@ -176,6 +180,7 @@ export class LevelScene extends Phaser.Scene {
     MAP = LEVEL.map;
     MAP_W = MAP[0].length;
     MAP_H = MAP.length;
+    EXTRA_STONE.clear();
     this.startCheckpoint = data.checkpoint ?? -1;
     this.startBottles = data.bottles ?? 0;
     this.progress = data.progress ?? new LevelProgress();
@@ -199,6 +204,7 @@ export class LevelScene extends Phaser.Scene {
     this.crates = [];
     this.hudSmoke = null;
     this.hudSmokeCount = null;
+    this.rubbleShown = false;
     this.dialogue = null;
     this.quest = null;
     this.groupZombies = [];
@@ -248,6 +254,7 @@ export class LevelScene extends Phaser.Scene {
     for (let i = 0; i < this.zombies.length; i++) this.physics.add.collider(this.zombies[i].body, solids);
 
     this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
+    if (this.progress.sawGunner) this.showRubble(false); // seen before a death: already there
     for (let i = 0; i < LEVEL.snipers.length; i++) {
       this.snipers.push(new Sniper(this, LEVEL.snipers[i], this.player, this.zombies, this.covers,
         (x, y) => isStone(Math.floor(x / TILE), Math.floor(y / TILE)), (x, y) => this.crateHit(x, y)));
@@ -290,6 +297,7 @@ export class LevelScene extends Phaser.Scene {
     }
     if (this.smokeQuest) {
       this.smokeQuest.update(time, this.player);
+      if (this.progress.sawGunner) this.showRubble(true);
       if (this.dialogue && this.dialogue.open) return;
     }
     if (this.controls.pressed(Action.Back)) {
@@ -600,25 +608,15 @@ export class LevelScene extends Phaser.Scene {
     const grass = map.createBlankLayer('grass', tileset, 0, 0);
     if (!ground || !grass) throw new Error('could not create tilemap layers');
 
+    this.groundLayer = ground;
+    this.grassLayer = grass;
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
         if (MAP[y][x] === 'Z') { // scaffolding: planks, drawn as an image
           this.add.image(x * TILE, y * TILE, 'scaffold').setOrigin(0, 0).setScale(ART_SCALE).setDepth(1);
           continue;
         }
-        if (!isStone(x, y)) continue;
-        const top = !isStone(x, y - 1);
-        const bottom = !isStone(x, y + 1);
-        const left = !isStone(x - 1, y);
-        const right = !isStone(x + 1, y);
-        const row = top ? 0 : bottom ? 2 : 1;
-        let index: number;
-        if (left && right) index = PANEL_COLUMN_1WIDE[row];
-        else if (left) index = PANEL_ROW_FIRST[row];
-        else if (right) index = PANEL_ROW_FIRST[row] + 3;
-        else index = PANEL_ROW_FIRST[row] + 1 + (x % 2);
-        ground.putTileAt(index, x, y);
-        if (top && y > 0) grass.putTileAt(GRASS[(x * 7 + y * 3) % 4], x, y - 1);
+        this.drawStone(x, y);
       }
     }
     ground.setScale(ART_SCALE).setDepth(0);
@@ -639,6 +637,49 @@ export class LevelScene extends Phaser.Scene {
       }
     }
     return solids;
+  }
+
+  /** Auto-tile one map cell from its stone neighbours (top / middle / bottom row, left / right caps) + grass on top. */
+  private drawStone(x: number, y: number): void {
+    if (!isStone(x, y)) {
+      this.groundLayer.removeTileAt(x, y);
+      return;
+    }
+    const top = !isStone(x, y - 1);
+    const bottom = !isStone(x, y + 1);
+    const left = !isStone(x - 1, y);
+    const right = !isStone(x + 1, y);
+    const row = top ? 0 : bottom ? 2 : 1;
+    let index: number;
+    if (left && right) index = PANEL_COLUMN_1WIDE[row];
+    else if (left) index = PANEL_ROW_FIRST[row];
+    else if (right) index = PANEL_ROW_FIRST[row] + 3;
+    else index = PANEL_ROW_FIRST[row] + 1 + (x % 2);
+    this.groundLayer.putTileAt(index, x, y);
+    if (y > 0) {
+      if (top) this.grassLayer.putTileAt(GRASS[(x * 7 + y * 3) % 4], x, y - 1);
+      else this.grassLayer.removeTileAt(x, y - 1);
+    }
+  }
+
+  /**
+   * M2 Medium: once the machine gun has been seen, a wall section in area 1 has collapsed in the shooting
+   * and its rubble makes steps up to the scaffolding. Stone like the rest: it blocks fire, it is solid.
+   */
+  private showRubble(withDust: boolean): void {
+    if (this.rubbleShown || LEVEL.rubble.length === 0) return;
+    this.rubbleShown = true;
+    const tiles = LEVEL.rubble;
+    for (let i = 0; i < tiles.length; i++) EXTRA_STONE.add(tiles[i][1] * MAP_W + tiles[i][0]);
+    for (let i = 0; i < tiles.length; i++) {
+      const [x, y] = tiles[i];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.drawStone(x + dx, y + dy);
+      this.solids.add(this.add.zone((x + 0.5) * TILE, (y + 0.5) * TILE, TILE, TILE));
+      if (withDust && this.textures.exists('smoke_puff')) {
+        const puff = this.add.image((x + 0.5) * TILE, (y + 0.5) * TILE, 'smoke_puff').setDepth(20).setAlpha(0.8).setScale(0.6);
+        this.tweens.add({ targets: puff, alpha: 0, scale: 1.4, y: puff.y - 40, duration: 1600, onComplete: () => puff.destroy() });
+      }
+    }
   }
 
   private spawnEntities(): void {
@@ -811,7 +852,16 @@ export class LevelScene extends Phaser.Scene {
     const img = this.add.image(feetX, feetY, 'big_crate').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(12);
     const rect = new Phaser.Geom.Rectangle(feetX - img.displayWidth / 2, feetY - img.displayHeight, img.displayWidth, img.displayHeight);
     this.covers.push(rect);
-    if (LEVEL.breakableCrates) this.crates.push({ rect: rect, img: img, hp: CRATE_HP });
+    if (!LEVEL.breakableCrates) return;
+    const saved = this.progress.crateHp[this.crates.length];
+    const crate: BreakableCrate = { rect: rect, img: img, hp: saved ?? CRATE_HP };
+    this.crates.push(crate);
+    if (crate.hp <= 0) { // broken before a death: stays broken
+      img.setTexture('big_crate_broken').setDepth(4);
+      this.covers.splice(this.covers.indexOf(rect), 1);
+    } else if (crate.hp < CRATE_HP) {
+      img.setTexture('big_crate_cracked');
+    }
   }
 
   /** A soldier's bullet hit cover at (x, y): a wooden crate cracks, then breaks (no longer cover). */
@@ -820,6 +870,7 @@ export class LevelScene extends Phaser.Scene {
       const c = this.crates[i];
       if (c.hp <= 0 || !Phaser.Geom.Rectangle.Contains(Phaser.Geom.Rectangle.Inflate(Phaser.Geom.Rectangle.Clone(c.rect), 6, 6), x, y)) continue;
       c.hp--;
+      this.progress.crateHp[i] = c.hp; // remembered over a death
       if (c.hp > 0) {
         c.img.setTexture('big_crate_cracked');
       } else {
