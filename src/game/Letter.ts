@@ -10,13 +10,11 @@ import type { Player } from './Player';
  *  - Standing next to him: Up opens the letter. The game pauses while it is open.
  *  - Arabic book order: ← next page, → previous page; Up / Space / X closes it.
  *  - The paper is an HTML element over the canvas (Phaser DOM): real text shaping, wrapping and fonts.
- *    Each page ends with a game-UI tip strip (the keys), outside the letter itself.
  */
 
 interface LetterPage {
   title: string;
   paragraphs: string[];
-  tip: string;
 }
 
 const PAGES: LetterPage[] = [
@@ -27,7 +25,6 @@ const PAGES: LetterPage[] = [
       'عشتُ بعد نهاية العالم سنواتٍ أكثر مما ظننت. لم أنجُ لأني الأقوى، بل لأني تعلّمتُ متى أصمت، ومتى أنتظر، ومتى أضرب.',
       'كتبتُ لك هنا كل ما تعلّمته، ورقةً ورقة. اقرأها كلها قبل أن تنزل إلى النفق. هذه وصيتي، وهي كل ما أملك أن أتركه لك.',
     ],
-    tip: '',
   },
   {
     title: 'أولًا: الكليكرز (Clickers)',
@@ -36,7 +33,6 @@ const PAGES: LetterPage[] = [
       'يسمع خطوتك العادية من بعيد، ويسمع ركضك من أبعد، ويسمع ارتطامك بالأرض إذا قفزتَ من مكانٍ عالٍ. فإن سمعك مرةً لن يتركك، وسيتبع صوتك أينما ذهبت.',
       'لذلك انحنِ، وامشِ منحنيًا؛ المنحني لا يُسمع. تعلّم هذا قبل أي شيء آخر. ولا تلتصق بأحدهم حتى وأنت منحنٍ؛ إن صرتَ على بُعد ذراعين منه شعر بأنفاسك.',
     ],
-    tip: 'انحنِ / قِف:  ↓  أو  C     •     الركض: Shift (يُسمع من بعيدٍ جدًا)',
   },
   {
     title: 'لا تواجه الكليكر أبدًا',
@@ -46,7 +42,6 @@ const PAGES: LetterPage[] = [
       'هذه لحظتك الوحيدة. وهو واقفٌ مشغولٌ بالصوت، تسلّل خلفه منحنيًا واضربه من ظهره؛ ضربةٌ واحدة تكفي. لكن أسرِع، فلن يُصغي إلا ثوانيَ قليلة، ثم يعود يبحث عنك.',
       'وفي النفق السقف منخفض؛ ارمِ قريبًا ومنخفضًا، وإلا ارتطمت الزجاجة بالسقف فوق رأسك.',
     ],
-    tip: 'ارمِ: اضغط E مطوّلًا، صوّب بالأسهم، ثم اترك     •     علامة ! فوق الكليكر = مشغول: اضربه من ظهره بـ X',
   },
   {
     title: 'الصناديق',
@@ -55,7 +50,6 @@ const PAGES: LetterPage[] = [
       'ما دمتَ منحنيًا خلف صندوق فلن يجدك أحدٌ منهم، لا الكليكرز ولا غيرهم، حتى لو مرّ من جانبك. سيبحث قليلًا، ثم ييأس ويعود إلى مكانه.',
       'تعلّم أين الصناديق قبل أن تحتاجها. واجمع الزجاجات أينما وجدتها؛ ستجد بعضها مخبّأً معًا. الزجاجة الفارغة هنا أثمن من الطعام.',
     ],
-    tip: 'منحنٍ خلف صندوق = مختفٍ تمامًا: لا يراك أحد ولا يمسك بك',
   },
   {
     title: 'ثانيًا: الرانرز (Runners)',
@@ -65,7 +59,6 @@ const PAGES: LetterPage[] = [
       'اقفز وانزل على رأسه بقدميك. سيدوخ ويترنّح ثوانيَ قليلة، وفي هذه الثواني اضربه بيديك، مرةً ومرةً ومرة، حتى يسقط ولا يقوم. وإن أصابت زجاجةٌ رأسه دوّخته أيضًا.',
       'ولا تتوقف عن الضرب؛ إن أفاق قبل أن يسقط، عاد إليك أشرس مما كان.',
     ],
-    tip: 'اقفز: Space     •     اضرب: X     •     اقفز على رأسه، ثم 3 ضربات وهو دائخ',
   },
   {
     title: 'ثالثًا: السكريمر (Screamer)',
@@ -74,7 +67,6 @@ const PAGES: LetterPage[] = [
       'سمعتُ صرختها مرةً واحدة، فخرج الرانرز من كل مكان يركضون نحو الصوت. لا أعرف عنها أكثر من هذا. لكن إياك أن تدعها تراك.',
       'وشيءٌ أخير: الأبواب في هذه المدينة مقفلة، والمفاتيح معهم. رأيتُ أقواهم يحمل مفتاحًا كأنه يحرس الطريق. لن تعبر بابًا إلا إذا أسقطتَ حارسه.',
     ],
-    tip: '',
   },
   {
     title: '',
@@ -83,7 +75,6 @@ const PAGES: LetterPage[] = [
       'لا تثق بالصمت، ولا بالظلام. كن أذكى منهم لا أقوى منهم، واصبر؛ الصبر هنا سلاح.',
       'عِشْ يا بُني. هذا كل ما أطلبه منك.',
     ],
-    tip: '',
   },
 ];
 
@@ -110,7 +101,6 @@ export class Letter {
   private readonly bodyEl: HTMLDivElement;
   private readonly signEl: HTMLDivElement;
   private readonly pageEl: HTMLDivElement;
-  private readonly tipEl: HTMLDivElement;
   private page = 0;
 
   /** wallX = left edge of the wall he leans on (px), feetY = floor (px). */
@@ -137,14 +127,12 @@ export class Letter {
     root.innerHTML =
       '<div class="letter-paper"><div class="letter-title"></div><div class="letter-body"></div>'
       + '<div class="letter-sign"></div><div class="letter-page"></div></div>'
-      + '<div class="letter-tip"></div>'
       + '<div class="letter-keys"><span>← الصفحة التالية</span><span>→ السابقة</span><span>↑ إغلاق</span></div>';
     this.paper = root.querySelector('.letter-paper') as HTMLDivElement;
     this.titleEl = root.querySelector('.letter-title') as HTMLDivElement;
     this.bodyEl = root.querySelector('.letter-body') as HTMLDivElement;
     this.signEl = root.querySelector('.letter-sign') as HTMLDivElement;
     this.pageEl = root.querySelector('.letter-page') as HTMLDivElement;
-    this.tipEl = root.querySelector('.letter-tip') as HTMLDivElement;
     this.element = scene.add.dom(w / 2, h / 2, root).setScrollFactor(0).setDepth(100).setVisible(false);
     void document.fonts.load('31px "Noto Naskh Arabic"'); // fetch the font now, not on the first page
   }
@@ -219,8 +207,6 @@ export class Letter {
     const last = this.page === PAGES.length - 1;
     this.signEl.textContent = last ? SIGNATURE : '';
     this.pageEl.textContent = toArabicDigits(this.page + 1) + ' / ' + toArabicDigits(PAGES.length);
-    this.tipEl.textContent = p.tip;
-    this.tipEl.style.visibility = p.tip ? 'visible' : 'hidden';
   }
 }
 

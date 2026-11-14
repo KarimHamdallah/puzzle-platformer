@@ -98,26 +98,11 @@ canvas {
   color: rgba(42, 29, 18, 0.65);
 }
 
-/* Game UI under the paper: the keys for what this page talks about. */
-.letter-tip {
-  margin: 22px auto 0;
-  width: fit-content;
-  max-width: 1100px;
-  padding: 10px 28px;
-  font-family: 'Segoe UI', Tahoma, sans-serif;
-  font-size: 25px;
-  font-weight: 600;
-  color: #f6e7b8;
-  background: rgba(20, 16, 10, 0.85);
-  border: 2px solid rgba(255, 210, 74, 0.55);
-  border-radius: 10px;
-}
-
 .letter-keys {
   display: flex;
   justify-content: center;
   gap: 48px;
-  margin-top: 14px;
+  margin-top: 22px;
   font-family: 'Segoe UI', Tahoma, sans-serif;
   font-size: 22px;
   color: rgba(240, 230, 200, 0.75);
