@@ -24,6 +24,9 @@ import type { Player } from './Player';
  *                              brings SCREAM_SUMMONS fresh Runners sprinting in from off-screen (the scene
  *                              spawns them). Silent takedown from behind only.
  *
+ * Horde Clickers (`feeding`) eat at the corpses: they hear the player only within HORDE_HEARING tiles,
+ * still follow bottles, and return to the pile. ignite() burns any zombie (Molotov).
+ *
  * Icons over heads: "?" = searching / suspicious, red "!!" = it found you, pulsing gold "!" = a Clicker
  * busy with a distraction: the only moment it can be taken down (from behind).
  */
@@ -45,6 +48,7 @@ enum ZombieState {
   Distracted, // Screamer: staring at a noise
   Alert, // Screamer: sees the player, screaming
   Grab, // caught the player
+  Burning, // set on fire (Molotov): harmless, flailing, then dead
   Dead,
 }
 
@@ -101,8 +105,12 @@ const PROBE = 2; // px size of the wall / ledge probes
 const ARRIVE = 0.25; // tiles: close enough to a target x
 const CONTACT_INSET = 6; // px: contact needs real overlap, not a grazing touch
 const TURN_WARNING = 0.7; // s before a Screamer turns around: "?" telegraph
+const FEED_ANIM = 'zombie_man_feed'; // the attack frames, looped slowly: hunched over a corpse, eating
 const PUNCH_KEEPS_DIZZY = 0.6; // s: a punch never lets the dizzy window end right after it
 export const SCREAM_SUMMONS = 2; // Runners called in by each alert's first scream
+const HORDE_HEARING = 3; // tiles: a feeding horde Clicker only hears the player this close
+const BURN_TIME = 1.4; // s on fire before falling dead
+const FIRE_SCALE = 2.4;
 const ICON_ALERT = '!!'; // found you
 const ICON_COLOR = '#f0e6c8';
 const ICON_ALERT_COLOR = '#ff5a48';
@@ -120,8 +128,13 @@ export class Zombie {
   distracted = false; // Clicker: busy with a bottle / scream (the only time it can be taken down)
   hasKey = false; // guardian: drops the key of a locked door when it dies (the scene drops it)
   summons = 0; // Screamer: Runners her scream just called in (the scene spawns them and resets this)
+  feeding = false; // horde Clicker: eats at its post, hears the player only up close
 
+  private readonly scene: Phaser.Scene;
   private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
+  private fire: Phaser.GameObjects.Sprite | null = null; // while burning
+  private burnDelay = 0; // s before the flames reach it
+  private burnTime = 0;
   private readonly sprite: Phaser.GameObjects.Sprite;
   private readonly icon: Phaser.GameObjects.Text;
   private readonly fx: Phaser.GameObjects.Graphics; // dizzy stars
@@ -144,6 +157,7 @@ export class Zombie {
     this.homeDir = dir;
     this.homeX = feetX;
     this.patrols = patrols;
+    this.scene = scene;
     this.physics = scene.physics;
     this.health = kind === ZombieKind.Runner ? T.runnerHealth : 1;
     this.state = patrols ? ZombieState.Patrol : ZombieState.Post;
@@ -192,7 +206,7 @@ export class Zombie {
 
   /** Can catch the player right now. */
   get dangerous(): boolean {
-    return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Grab;
+    return this.alive && this.state !== ZombieState.Stunned && this.state !== ZombieState.Grab && this.state !== ZombieState.Burning;
   }
 
   /** Real overlap with the player's body (a few px of grace on every side). */
@@ -260,15 +274,48 @@ export class Zombie {
       if (this.onGround()) b.setVelocityX(0);
       return;
     }
+    if (this.state === ZombieState.Burning) {
+      b.setVelocityX(0);
+      if (this.burnDelay > 0) { // the fire is still spreading toward it
+        this.burnDelay -= dt;
+        if (this.burnDelay <= 0) this.catchFire();
+        return;
+      }
+      this.burnTime -= dt;
+      if (this.burnTime <= 0) this.die();
+      return;
+    }
     if (this.kind === ZombieKind.Clicker) this.clicker(dt, player, noise);
     else if (this.kind === ZombieKind.Runner) this.runner(dt, player, noise);
     else this.screamer(dt, player, noise);
+  }
+
+  /** Set on fire after `delay` s (the flames spread from the Molotov's impact). */
+  ignite(delay: number): void {
+    if (!this.alive || this.state === ZombieState.Burning) return;
+    this.state = ZombieState.Burning;
+    this.burnDelay = delay;
+    this.burnTime = BURN_TIME;
+    this.distracted = false;
+    this.body.setVelocityX(0);
+    this.showIcon('', 0);
+    if (delay <= 0) this.catchFire();
+  }
+
+  private catchFire(): void {
+    this.fire = this.scene.add.sprite(this.feetX, this.feetY + 6, 'fire').setOrigin(0.5, 1).setScale(FIRE_SCALE).setDepth(9);
+    this.fire.play({ key: 'fire', startFrame: Math.floor(Math.random() * 8) });
+    this.restartAnim = true;
   }
 
   /** Visuals, once per rendered frame. */
   update(timeMs: number): void {
     this.sprite.setPosition(this.feetX, this.feetY);
     this.sprite.setFlipX(this.dir < 0);
+    if (this.fire) {
+      this.fire.setPosition(this.feetX, this.feetY + 6);
+      if (this.state === ZombieState.Burning) this.sprite.setTint((Math.floor(timeMs / 70) % 2) === 0 ? 0xff9a60 : 0xffc890); // flicker
+    }
     const headY = this.feetY - this.body.height;
     // The takedown window overrides the timed icons with a pulsing gold "!".
     const takedown = this.takedownWindow;
@@ -291,6 +338,8 @@ export class Zombie {
     const moving = Math.abs(this.body.velocity.x) > 1;
     switch (this.state) {
       case ZombieState.Dead: anim = this.info.dead; break;
+      case ZombieState.Burning: anim = this.fire ? this.info.hurt : this.feeding ? FEED_ANIM : this.info.idle; break;
+      case ZombieState.Post: anim = this.feeding ? FEED_ANIM : this.info.idle; break;
       case ZombieState.Grab: anim = this.info.grab; break;
       case ZombieState.Stunned: anim = this.info.hurt; break;
       case ZombieState.Alert: anim = this.info.alert; break;
@@ -315,7 +364,7 @@ export class Zombie {
   private clicker(dt: number, player: Player, noise: NoiseSystem): void {
     const b = this.body;
     const lure = this.lastHeard(noise, true);
-    const steps = this.lastHeard(noise, false);
+    const steps = this.lastHeard(noise, false, false, this.feeding ? HORDE_HEARING : Infinity);
     const sensed = !this.distracted && this.senses(player);
 
     if (lure) { // bottle / scream: go and listen there
@@ -565,7 +614,7 @@ export class Zombie {
    *  lures = false : the player's own noises (footsteps, landings, punches)
    * screamsOnly narrows lures to screams (Runners don't care about bottles).
    */
-  private lastHeard(noise: NoiseSystem, lures: boolean, screamsOnly: boolean = false): Noise | null {
+  private lastHeard(noise: NoiseSystem, lures: boolean, screamsOnly: boolean = false, maxTiles: number = Infinity): Noise | null {
     const headY = this.feetY - this.body.height * 0.8;
     let found: Noise | null = null;
     for (let i = 0; i < noise.heard.length; i++) {
@@ -574,7 +623,7 @@ export class Zombie {
       if (isLure !== lures) continue;
       if (screamsOnly && n.kind !== NoiseKind.Scream) continue;
       if (this.kind === ZombieKind.Screamer && n.kind === NoiseKind.Scream) continue; // her own voice
-      if (Phaser.Math.Distance.Between(n.x, n.y, this.feetX, headY) <= n.radius) found = n;
+      if (Phaser.Math.Distance.Between(n.x, n.y, this.feetX, headY) <= Math.min(n.radius, maxTiles * TILE)) found = n;
     }
     return found;
   }
@@ -616,6 +665,12 @@ export class Zombie {
     this.setState(ZombieState.Dead);
     this.distracted = false;
     this.showIcon('', 0);
+    if (this.fire) { // burned: charred body, the flames die down
+      this.sprite.setTint(0x4a3c34);
+      const f = this.fire;
+      this.fire = null;
+      this.scene.tweens.add({ targets: f, alpha: 0, scale: FIRE_SCALE * 0.6, delay: 600, duration: 1800, onComplete: () => f.destroy() });
+    }
   }
 
   private setState(s: ZombieState): void {

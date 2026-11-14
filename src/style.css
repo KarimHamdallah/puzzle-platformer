@@ -107,3 +107,48 @@ canvas {
   font-size: 22px;
   color: rgba(240, 230, 200, 0.75);
 }
+
+/* ---------------------------------------------------------------- the survivor's thoughts (Dialogue.ts) */
+
+.dialogue {
+  position: relative;
+  box-sizing: border-box;
+  width: 1300px;
+  min-height: 150px;
+  padding: 28px 56px 34px;
+  direction: rtl;
+  font-family: 'Noto Naskh Arabic', 'Segoe UI', Tahoma, serif;
+  color: #f3ead2;
+  background: linear-gradient(180deg, rgba(18, 15, 10, 0.92), rgba(10, 8, 6, 0.95));
+  border: 2px solid rgba(255, 210, 74, 0.45);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  user-select: none;
+}
+
+.dialogue-text {
+  font-size: 34px;
+  line-height: 1.7;
+}
+
+.dialogue-in { animation: dialogue-in 0.25s ease-out; }
+
+@keyframes dialogue-in {
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: none; }
+}
+
+.dialogue-next {
+  position: absolute;
+  left: 22px;
+  bottom: 10px;
+  direction: ltr;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 18px;
+  color: rgba(255, 210, 74, 0.75);
+  animation: dialogue-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes dialogue-blink {
+  50% { opacity: 0.35; }
+}

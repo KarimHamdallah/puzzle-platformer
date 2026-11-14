@@ -1,9 +1,13 @@
 import Phaser from 'phaser';
 import { ART_SCALE, TILE } from './constants';
+import { KeyColor } from './Levels';
 
 const DOOR_HEIGHT = 3; // tiles
 const TOUCH_MARGIN = 8; // px: walking into the door counts as touching it
 const LOCKED_MESSAGE_COOLDOWN = 1.5; // s
+const GATE = -1; // a door's `need` for a horde gate: no key opens it, openGates() does
+/** Tints for the red / green / blue keys (multiplied over the brass key sprite). */
+export const KEY_TINTS = [0xff6a58, 0x7ef08a, 0x7ab4ff];
 
 interface Door {
   zone: Phaser.GameObjects.Zone; // the static body that blocks the way
@@ -15,6 +19,7 @@ interface Door {
 }
 
 interface KeyPickup {
+  color: number; // KeyColor, or -1 for a plain door key
   x: number;
   y: number;
   sprite: Phaser.GameObjects.Image;
@@ -31,7 +36,9 @@ interface KeyPickup {
  *    can be sneaked past.
  */
 export class Locks {
-  keys = 0;
+  keys = 0; // plain door keys
+  /** Called with the colour when a coloured key is picked up. */
+  onColouredKey: ((color: KeyColor) => void) | null = null;
 
   private readonly scene: Phaser.Scene;
   private readonly solids: Phaser.Physics.Arcade.StaticGroup;
@@ -67,15 +74,26 @@ export class Locks {
     });
   }
 
-  /** A guardian died: its key falls where it stood. */
-  dropKey(x: number, feetY: number): void {
+  /** Horde gate (bottom tile at feet): solid until openGates(). */
+  addGate(feetX: number, feetY: number): void {
+    this.addDoor(feetX, feetY, GATE);
+    this.doors[this.doors.length - 1].image.setTint(0x9a8f80);
+  }
+
+  openGates(): void {
+    for (let i = 0; i < this.doors.length; i++) if (this.doors[i].need === GATE && !this.doors[i].open) this.openDoor(this.doors[i]);
+  }
+
+  /** A guardian died: its key falls where it stood. color = KeyColor, or -1 for a plain door key. */
+  dropKey(x: number, feetY: number, color: number = -1): void {
     const glow = this.scene.add.graphics({ x: x, y: feetY - 30 }).setDepth(13);
     glow.fillStyle(0xffd27a, 0.35).fillCircle(0, 0, 40);
     glow.fillStyle(0xffe6a8, 0.5).fillCircle(0, 0, 24);
     this.scene.tweens.add({ targets: glow, scale: 1.2, alpha: 0.6, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     const sprite = this.scene.add.image(x, feetY - 30, 'key').setScale(ART_SCALE * 1.5).setDepth(14);
+    if (color >= 0) sprite.setTint(KEY_TINTS[color]);
     this.scene.tweens.add({ targets: sprite, y: feetY - 40, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    this.pickups.push({ x: x, y: feetY, sprite: sprite, glow: glow });
+    this.pickups.push({ color: color, x: x, y: feetY, sprite: sprite, glow: glow });
   }
 
   /** At the physics rate: pick up keys, open doors the player walks into. */
@@ -86,7 +104,8 @@ export class Locks {
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const k = this.pickups[i];
       if (k.x > b.left - TILE * 0.5 && k.x < b.right + TILE * 0.5 && k.y > b.top && k.y < b.bottom + TILE * 0.5) {
-        this.keys++;
+        if (k.color < 0) this.keys++;
+        else if (this.onColouredKey) this.onColouredKey(k.color);
         k.sprite.destroy();
         k.glow.destroy();
         this.pickups.splice(i, 1);
@@ -95,7 +114,7 @@ export class Locks {
 
     for (let i = 0; i < this.doors.length; i++) {
       const d = this.doors[i];
-      if (d.open) continue;
+      if (d.open || d.need === GATE) continue;
       const r = d.rect;
       const touching = b.right + TOUCH_MARGIN > r.x && b.left - TOUCH_MARGIN < r.right && b.bottom > r.y && b.top < r.bottom;
       if (!touching) continue;

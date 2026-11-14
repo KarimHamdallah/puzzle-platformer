@@ -50,6 +50,10 @@ const IMAGES: [string, string][] = [
   ['key', 'assets/player/key.png'],
   ['door', 'assets/player/door.png'],
   ['corpse', 'assets/player/corpse.png'],
+  ['car_chained', 'assets/player/car_chained.png'],
+  ['car_open', 'assets/player/car_open.png'],
+  ['molotov', 'assets/player/molotov.png'],
+  ['rag', 'assets/player/rag.png'],
   ['bg_sky', 'assets/craftpix/bg/sky.png'],
   ['bg_far', 'assets/craftpix/bg/far.png'],
   ['bg_mid', 'assets/craftpix/bg/mid.png'],
@@ -70,6 +74,7 @@ export function loadAssets(scene: Phaser.Scene): void {
   // Exclusion Zone tileset recoloured from blue-purple to olive stone / dark earth to match the
   // Postapocalypse backgrounds (colour-for-colour swap of its 8-colour palette).
   scene.load.image('tileset', 'assets/craftpix/tiles/tileset_olive.png');
+  scene.load.spritesheet('fire', 'assets/player/fire.png', { frameWidth: 32, frameHeight: 48 }); // drawn flames, 8 frames
 }
 
 /** Call from create(): nearest-neighbour filtering for pixel art + animation definitions (once per game). */
@@ -78,6 +83,7 @@ export function createAnimations(scene: Phaser.Scene): void {
   for (let i = 0; i < SHEETS.length; i++) textures.get(SHEETS[i].key).setFilter(Phaser.Textures.FilterMode.NEAREST);
   for (let i = 0; i < IMAGES.length; i++) textures.get(IMAGES[i][0]).setFilter(Phaser.Textures.FilterMode.NEAREST);
   textures.get('tileset').setFilter(Phaser.Textures.FilterMode.NEAREST);
+  textures.get('fire').setFilter(Phaser.Textures.FilterMode.NEAREST);
 
   for (let i = 0; i < SHEETS.length; i++) {
     const s = SHEETS[i];
@@ -88,5 +94,11 @@ export function createAnimations(scene: Phaser.Scene): void {
       frameRate: s.frameRate,
       repeat: s.loop ? -1 : 0,
     });
+  }
+  if (!scene.anims.exists('fire')) {
+    scene.anims.create({ key: 'fire', frames: scene.anims.generateFrameNumbers('fire', {}), frameRate: 14, repeat: -1 });
+  }
+  if (!scene.anims.exists('zombie_man_feed')) { // horde: the attack frames, slow and back and forth = tearing at a corpse
+    scene.anims.create({ key: 'zombie_man_feed', frames: scene.anims.generateFrameNumbers('zombie_man_attack', {}), frameRate: 5, repeat: -1, yoyo: true });
   }
 }

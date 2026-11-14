@@ -63,6 +63,27 @@ PALETTE = {
     'm': (176, 162, 128),  # paper shade / ink
     'b': (84, 26, 22),     # dried blood
     'C': (140, 140, 132),  # grey hair / beard
+    # wrecked car
+    '1': (112, 58, 40),    # rusted red paint
+    '2': (82, 40, 30),     # paint shade
+    '3': (140, 86, 52),    # rust highlight
+    '4': (34, 34, 36),     # tyre / dark glass
+    '5': (62, 64, 66),     # rim / steel
+    '6': (58, 92, 104),    # broken glass (dull blue)
+    '7': (24, 22, 30),     # gasoline puddle
+    '8': (70, 60, 92),     # oil-sheen on the puddle
+    'h': (196, 52, 44),    # red padlock
+    'n': (60, 168, 72),    # green padlock
+    'u': (58, 110, 206),   # blue padlock
+    'c': (150, 150, 150),  # chain
+    # fire (symbols: every letter is taken)
+    '!': (255, 244, 190),  # flame core
+    '@': (255, 200, 70),   # flame yellow
+    '$': (240, 118, 34),   # flame orange
+    '%': (178, 44, 26),    # flame red tips
+    # rag
+    '=': (196, 186, 150),  # cloth
+    '-': (150, 138, 104),  # cloth shade
 }
 
 
@@ -420,6 +441,117 @@ def draw_corpse_sprite():
     return c.image().crop((24, 64, 68, 96))   # 44x32
 
 
+def draw_car_sprite(opened):
+    """Wrecked sedan, front to the RIGHT, ~84x40 px. Its tank still leaks: a drip and a dark puddle.
+    The trunk (left) is chained shut with a red, a green and a blue padlock; opened = lid up, empty."""
+    c = Canvas()
+    gy = 95
+    # puddle of gasoline under the tank (drawn first, everything else on top)
+    c.row(gy, 22, 46, '7'); c.row(gy - 1, 26, 42, '7')
+    for x in (28, 33, 39):
+        c.put(x, gy - 1, '8')
+    # wheels: rear one flat
+    for dy in range(-4, 5):                                          # rear tyre: flat, squashed wide
+        w = int(8 * (1 - (dy / 5) ** 2) ** 0.5) + 1
+        c.row(91 + dy, 21 - w, 21 + w, '4')
+    c.row(gy, 11, 31, '4')
+    c.rect(19, 89, 23, 92, '5')
+    for dy in range(-7, 8):
+        w = int((49 - dy * dy) ** 0.5)
+        c.row(87 + dy, 70 - w, 70 + w, '4')
+    c.rect(67, 84, 73, 90, '5'); c.put(70, 87, '4')
+    # body
+    c.rect(6, 72, 90, 85, '1')
+    c.row(85, 6, 90, '2'); c.row(84, 6, 90, '2')
+    c.rect(6, 72, 7, 85, '2')
+    c.rect(28, 76, 29, 85, '2'); c.rect(52, 76, 53, 85, '2')        # door seams
+    # cabin (sloped windscreen and rear window)
+    for i, y in enumerate(range(58, 72)):
+        x0 = 30 - min(i, 8)
+        x1 = 64 + min(i, 10)
+        c.row(y, x0, x1, '1')
+    c.row(58, 30, 64, '2')
+    for i, y in enumerate(range(61, 71)):                            # side windows, smashed
+        c.row(y, 30 - min(i, 6) + 2, 46, '4')
+        c.row(y, 50, 62 + min(i, 8), '4')
+    for x, y in ((33, 64), (34, 65), (36, 63), (55, 66), (57, 64), (58, 65), (41, 68), (60, 69)):
+        c.put(x, y, '6')                                             # glass shards left in the frames
+    c.rect(47, 60, 49, 71, '1')                                      # door pillar
+    # rust and dents
+    for x, y in ((12, 75), (13, 75), (13, 76), (40, 80), (41, 81), (78, 74), (79, 74), (79, 75), (60, 83), (22, 82)):
+        c.put(x, y, '3')
+    c.rect(86, 75, 89, 77, '5')                                      # broken headlight
+    c.rect(4, 76, 6, 79, '5')                                        # rear bumper end
+    # fuel cap + the drip
+    c.rect(30, 76, 32, 78, '5')
+    c.put(31, 79, '7'); c.put(31, 81, '7')
+    if not opened:
+        c.rect(8, 69, 26, 72, '1')                                   # trunk lid, shut
+        c.row(69, 8, 26, '2')
+        for i in range(0, 19):                                       # chain wrapped around the lid
+            c.put(8 + i, 74 + (i % 2), 'c')
+        c.rect(10, 75, 12, 79, 'h'); c.put(11, 76, '4')              # red, green, blue padlocks
+        c.rect(15, 75, 17, 79, 'n'); c.put(16, 76, '4')
+        c.rect(20, 75, 22, 79, 'u'); c.put(21, 76, '4')
+    else:
+        c.rect(9, 70, 26, 73, '4')                                   # open, empty trunk
+        c.stroke((26, 70), (16, 52), 3, '1')                         # lid raised
+        c.stroke((25, 69), (15, 51), 1, '2')
+    c.outline()
+    return c.image().crop((2, 50, 94, 96))   # 92x46
+
+
+def draw_molotov_sprite():
+    """Bottle with a rag stuffed in its neck, the rag's tip burning: 11x20 px."""
+    c = Canvas()
+    draw_bottle(c, 5, 18)
+    c.rect(4, 5, 6, 8, '=')                                          # rag in the neck
+    c.put(3, 6, '='); c.put(7, 4, '-'); c.put(6, 3, '=')
+    c.rect(5, 1, 6, 2, '@'); c.put(5, 0, '!'); c.put(6, 0, '$')     # flame on the rag
+    c.outline()
+    return c.image().crop((0, 0, 11, 20))
+
+
+def draw_rag_sprite():
+    """A torn piece of cloth (HUD icon / pickup): 14x10 px."""
+    c = Canvas()
+    c.rect(2, 3, 11, 7, '=')
+    c.row(2, 4, 9, '=')
+    c.row(8, 3, 10, '-')
+    for x, y in ((3, 4), (6, 5), (9, 3), (8, 6), (11, 5)):
+        c.put(x, y, '-')
+    c.put(12, 6, '='); c.put(1, 5, '=')
+    c.outline()
+    return c.image().crop((0, 1, 14, 11))
+
+
+def draw_fire_frames(frames=8, w=32, h=48):
+    """Pixel flames: a tapering body that sways and splits into tongues, white-yellow core, orange
+    body, red tips. Loops (phase goes once around a circle). Returns a frames*w x h sheet."""
+    sheet = Image.new('RGBA', (w * frames, h), (0, 0, 0, 0))
+    for f in range(frames):
+        ph = 2 * math.pi * f / frames
+        c = Canvas()
+        for y in range(h):
+            t = 1 - y / (h - 1)                                      # 0 at the base, 1 at the top
+            sway = math.sin(ph + t * 4.0) * 3 * t
+            half = (w * 0.42) * (1 - t) ** 0.65 + math.sin(ph * 2 + t * 9) * 1.5 * (1 - t)
+            if half < 0.6:
+                continue
+            cx = w / 2 + sway
+            for x in range(w):
+                d = abs(x + 0.5 - cx) / half                         # 0 centre .. 1 edge
+                if d > 1:
+                    continue
+                if t > 0.55 and math.sin(x * 1.7 + ph * 3 + t * 6) > 0.55:
+                    continue                                         # tongues: gaps near the top
+                heat = (1 - d) * (1 - t * 0.9)
+                col = '!' if heat > 0.62 else '@' if heat > 0.4 else '$' if heat > 0.18 else '%'
+                c.put(x, y, col)
+        sheet.alpha_composite(c.image().crop((0, 0, w, h)), (f * w, 0))
+    return sheet
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -454,12 +586,26 @@ def main():
     draw_key_sprite().save(os.path.join(out_dir, 'key.png'))
     draw_door_sprite().save(os.path.join(out_dir, 'door.png'))
     draw_corpse_sprite().save(os.path.join(out_dir, 'corpse.png'))
+    draw_car_sprite(False).save(os.path.join(out_dir, 'car_chained.png'))
+    draw_car_sprite(True).save(os.path.join(out_dir, 'car_open.png'))
+    draw_molotov_sprite().save(os.path.join(out_dir, 'molotov.png'))
+    draw_rag_sprite().save(os.path.join(out_dir, 'rag.png'))
+    draw_fire_frames().save(os.path.join(out_dir, 'fire.png'))
     if preview_dir:
         os.makedirs(preview_dir, exist_ok=True)
         corpse = draw_corpse_sprite()
         bg = Image.new('RGBA', corpse.size, (120, 128, 100, 255))
         bg.alpha_composite(corpse)
         bg.resize((corpse.width * 8, corpse.height * 8), Image.NEAREST).save(os.path.join(preview_dir, 'corpse_preview.png'))
+        items = [draw_car_sprite(False), draw_car_sprite(True), draw_molotov_sprite(), draw_rag_sprite(), draw_fire_frames()]
+        pw = sum(i.width for i in items) + 10 * len(items)
+        ph = max(i.height for i in items)
+        prev = Image.new('RGBA', (pw, ph), (120, 128, 100, 255))
+        x = 0
+        for i in items:
+            prev.alpha_composite(i, (x, ph - i.height))
+            x += i.width + 10
+        prev.resize((pw * 4, ph * 4), Image.NEAREST).save(os.path.join(preview_dir, 'medium_props_preview.png'))
 
     if preview_dir:  # contact sheet: every animation on its own row, 3x zoom, cropped to the body
         os.makedirs(preview_dir, exist_ok=True)

@@ -345,7 +345,7 @@ export class Player {
     if (!this.aiming) {
       // A fresh press (not consumed) starts aiming: holding the key after a throw does not re-aim.
       if (throwHeld && this.input.buffered(Action.Throw, 200) && onGround && !this.crouched && this.attackTimer <= 0
-        && this.throwables.count > 0) {
+        && this.throwables.canThrow) {
         this.input.consume(Action.Throw);
         this.aiming = true;
         this.aimDistance = THROW.startDistance * this.facing;

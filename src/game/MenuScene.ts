@@ -11,6 +11,7 @@ import { BACKGROUND, ROOM_H, ROOM_W, SOLID, SOLIDS } from './PlaygroundScene';
 
 interface LevelEntry {
   scene: string; // scene key to start, '' = locked (not built yet)
+  level: number; // LEVELS index for the 'Level' scene
   label: string; // difficulty / kind
   title: string;
   blurb: string;
@@ -31,16 +32,16 @@ const SECTIONS: MenuSection[] = [
     heading: 'DAY 1  -  MOVEMENT',
     subheading: 'The very first test: the greybox room and the cube the movement was tuned with on Day 1.',
     levels: [
-      { scene: 'Playground', label: 'TEST ROOM', title: 'Movement Test Room', blurb: 'No enemies. Just run, jump and get the feel.', thumb: '' },
+      { scene: 'Playground', level: 0, label: 'TEST ROOM', title: 'Movement Test Room', blurb: 'No enemies. Just run, jump and get the feel.', thumb: '' },
     ],
   },
   {
     heading: 'MECHANIC 1  -  NOISE & DISTRACTION',
     subheading: 'Clickers hear but cannot see. Throw bottles to lure them, sneak, hide behind crates, strike from behind.',
     levels: [
-      { scene: 'Demo', label: 'EASY', title: 'The Long Way Out', blurb: 'Tunnel, yard, a building, the rooftops.', thumb: THUMB_M1_EASY },
-      { scene: '', label: 'MEDIUM', title: 'Coming soon', blurb: 'Locked: the difficulty design comes first.', thumb: '' },
-      { scene: '', label: 'HARD', title: 'Coming soon', blurb: 'Locked: the difficulty design comes first.', thumb: '' },
+      { scene: 'Level', level: 0, label: 'EASY', title: 'The Long Way Out', blurb: 'Tunnel, yard, a building, the rooftops.', thumb: THUMB_M1_EASY },
+      { scene: 'Level', level: 1, label: 'MEDIUM', title: 'The Horde', blurb: 'Too many to sneak past. A car leaks gasoline...', thumb: '' },
+      { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Locked: the difficulty design comes first.', thumb: '' },
     ],
   },
 ];
@@ -259,6 +260,6 @@ export class MenuScene extends Phaser.Scene {
     }
     this.leaving = true;
     this.cameras.main.fadeOut(200, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start(entry.scene, { checkpoint: -1, bottles: 0 }));
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start(entry.scene, { level: entry.level, checkpoint: -1, bottles: 0 }));
   }
 }

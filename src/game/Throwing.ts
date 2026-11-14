@@ -43,9 +43,11 @@ class Bottle {
   vx: number;
   vy: number;
   readonly sprite: Phaser.GameObjects.Image;
+  readonly molotov: boolean;
 
-  constructor(sprite: Phaser.GameObjects.Image, x: number, y: number, vx: number, vy: number) {
+  constructor(sprite: Phaser.GameObjects.Image, x: number, y: number, vx: number, vy: number, molotov: boolean) {
     this.sprite = sprite;
+    this.molotov = molotov;
     this.x = x;
     this.y = y;
     this.vx = vx;
@@ -62,9 +64,13 @@ interface Pickup {
 
 /**
  * Bottles: the player's inventory, bottles in flight, pickups on the floor, the aim preview.
+ * A Molotov (Medium) is thrown the same way: while you have one, the next throw is the Molotov; where
+ * it breaks goes to `onMolotov` (the scene decides what burns).
  */
 export class Throwables {
   count: number;
+  molotovs = 0;
+  onMolotov: ((x: number, y: number) => void) | null = null;
   /** The infected, so bottles (and the aim preview) can hit them; the scene fills this. */
   zombies: Zombie[] = [];
 
@@ -126,11 +132,17 @@ export class Throwables {
     this.pickups.push({ x: feetX, y: feetY, sprite: sprite, glow: glow });
   }
 
+  get canThrow(): boolean {
+    return this.count > 0 || this.molotovs > 0;
+  }
+
   throwBottle(x: number, y: number, v: Vec): void {
-    if (this.count <= 0) return;
-    this.count--;
-    const sprite = this.scene.add.image(x, y, 'bottle').setScale(ART_SCALE).setDepth(12);
-    this.flying.push(new Bottle(sprite, x, y, v.x, v.y));
+    const molotov = this.molotovs > 0;
+    if (molotov) this.molotovs--;
+    else if (this.count > 0) this.count--;
+    else return;
+    const sprite = this.scene.add.image(x, y, molotov ? 'molotov' : 'bottle').setScale(ART_SCALE).setDepth(12);
+    this.flying.push(new Bottle(sprite, x, y, v.x, v.y, molotov));
   }
 
   /** Gameplay at the physics rate: flight, impacts (zombies, solids -> noise), pickups. */
@@ -143,10 +155,14 @@ export class Throwables {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       const hit = this.hitZombie(b.x, b.y, zombies);
-      if (hit) hit.hitByBottle();
+      if (hit && !b.molotov) hit.hitByBottle();
       if (hit || this.hitsSolid(b.x, b.y)) {
         this.shatter(b.x, b.y);
-        noise.emit(b.x, b.y, THROW.bottleNoise, NoiseKind.Bottle);
+        if (b.molotov) {
+          if (this.onMolotov) this.onMolotov(b.x, b.y);
+        } else {
+          noise.emit(b.x, b.y, THROW.bottleNoise, NoiseKind.Bottle);
+        }
         b.sprite.destroy();
         this.flying.splice(i, 1);
       }
@@ -187,9 +203,14 @@ export class Throwables {
     const hitsZombie = this.predict(x, y, v);
     const g = this.aimGfx;
     g.clear();
-    g.fillStyle(0xffffff, 0.9);
+    const molotov = this.molotovs > 0;
+    g.fillStyle(molotov ? 0xff9a3c : 0xffffff, 0.9);
     for (let i = 0; i < this.path.length; i += 3) g.fillCircle(this.path[i].x, this.path[i].y, 3);
     const end = this.path[this.path.length - 1];
+    if (molotov) { // where the fire starts
+      g.lineStyle(4, 0xff7a2a, 1).strokeCircle(end.x, end.y, 18);
+      return;
+    }
     g.lineStyle(hitsZombie ? 5 : 3, hitsZombie ? 0xff4040 : 0xffe066, 1);
     g.strokeCircle(end.x, end.y, hitsZombie ? 16 : 10);
     g.lineStyle(2, 0xffe066, 0.35);

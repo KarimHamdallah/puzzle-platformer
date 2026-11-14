@@ -1,5 +1,5 @@
 """
-Builds the demo level's ASCII map (printed as a TypeScript array to paste into DemoScene.ts).
+Builds the EASY level's ASCII map (printed as a TypeScript array to paste into src/game/Levels.ts, EASY_MAP).
 
 Design rules (player: 1.8 tiles tall, jumps 3.2; Clicker 1.85 tall; Runner jumps 3.3, runs faster
 than your sprint):
