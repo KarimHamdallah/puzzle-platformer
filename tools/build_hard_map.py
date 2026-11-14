@@ -2,13 +2,13 @@
 Builds the HARD level's ASCII map (Mechanic 1: noise & distraction, at night), printed as a TypeScript
 array to paste into src/game/Levels.ts (HARD_MAP).
 
-Night: you see ~5 tiles around you. Clickers flash when they click; lightning lights everything for a
+Night: you see ~3.5 tiles around you. Clickers flash when they click; lightning lights everything for a
 moment and its thunder covers your footsteps for 2 s. Stashes hold ONE bottle. The upgrade is Listen
 Mode (hold Q): frozen, you hear every infected within 20 tiles, through walls.
 
   1. intro street (x 1..30): safe. A Clicker is sealed in a cellar under the street: hold Q to hear it.
-  2. dark alley (x 31..75): 3-tile ceiling, a patrolling Clicker, a guardian Clicker facing you, one
-     bottle. Hide from the patrol, lure the guardian with your only bottle, strike from behind.
+  2. dark alley (x 31..75): 3-tile ceiling, a patrolling Clicker, a guardian Clicker facing you, a
+     bottle for each (one outside, one inside). Hide from the patrol, lure, strike from behind.
   3. thunder yard (x 76..123): open sky, the guardian Runner and a patrolling Clicker. Cross the Clicker's
      hearing while the thunder rolls; stomp + punch the Runner.
   4. the watch (x 124..168): a Screamer on a step at the end of a low hall, three Clickers between you
@@ -47,11 +47,13 @@ put(16, 29, 'C')                  # ...with a Clicker in it: harmless, the Liste
 put(28, 25, 'K')
 
 # ---- 2: dark alley (x 31..75) ---------------------------------------------------------------------
-put(31, 25, 'x')                  # one bottle, outside: use it well
+# One bottle per Clicker in every part (stashes hold a single bottle at night).
+put(31, 25, 'x')                  # bottle 1, outside
 fill(33, 21, 73, 22)              # alley roof: interior rows 23..25 (covers the door)
 put(37, 25, 'B')
 put(44, 25, 'c')                  # patrolling Clicker: hide when it passes
 put(46, 25, 'B')
+put(47, 25, 'x')                  # bottle 2, by the crate (the patrol walks past it)
 put(55, 25, 'B')
 put(64, 25, 'B')
 put(66, 25, 'C')                  # guardian Clicker facing you: lure it toward the door, strike its back
@@ -77,8 +79,10 @@ put(124, 25, 'K')
 put(123, 25, 'x')
 fill(126, 21, 166, 22)            # hall roof: interior rows 23..25
 put(129, 25, 'B')
+put(130, 25, 'x')                 # bottle 2 of 3 (one per Clicker in the hall)
 put(133, 25, 'C')                 # Clicker at its post
 put(136, 25, 'B')
+put(137, 25, 'x')                 # bottle 3 of 3
 put(140, 25, 'c')                 # patrolling Clicker
 put(144, 25, 'B')
 put(148, 25, 'C')                 # Clicker at its post
