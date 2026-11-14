@@ -13,7 +13,8 @@ import type { Zombie } from './Zombie';
  *  - The moment you step into his area he has you, and never lets go. The laser CHASES you, faster
  *    than you sprint (CHASE_SPEED). Once the dot is on you (or on the crate in front of you) he fires
  *    after AIM_TIME -> Reload (RELOAD_TIME, the laser dims but keeps following you) -> Aim...
- *    A crate between you and him takes the bullet. Run during the reload, crate to crate.
+ *    A crate between you and him takes the bullet, if you CROUCH behind it: he aims at your head, and
+ *    standing it shows over the crate. Run during the reload, crate to crate.
  * Machine gunner ("no mercy"):
  *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it. On you: you are pinned
  *    where you stand (Player.pinned) while he empties GUNNER_PLAYER_TIME of fire into you; no escape. A
@@ -62,6 +63,7 @@ const GUNNER_SWEEP = 5; // tiles/s
 const GUNNER_BURST = 0.09; // s between machine-gun shots
 const GUNNER_PLAYER_TIME = 0.9; // s he keeps firing into you (pinned, you can't move) before you fall
 const GUNNER_KILL_TIME = 2.7; // s of fire to cut down a zombie (the player's window)
+const HEAD_INSET = 0.1; // tiles below the top of the player's body: where soldiers aim
 const RAY_STEP = 6; // px
 const LASER_COLOUR = 0xff2a3a;
 const FLASH_TIME = 0.07; // s
@@ -136,14 +138,14 @@ export class Sniper {
           break;
         }
         const tx = p.body.center.x;
-        const ty = p.body.center.y;
+        const ty = this.headY();
         this.track(dt, tx, ty, CHASE_SPEED);
         if (Phaser.Math.Distance.Between(this.laserX, this.laserY, tx, ty) < LOCK_RADIUS * TILE) this.timer -= dt;
         if (this.timer <= 0) this.fireRifle();
         break;
       }
       case State.Reload:
-        if (!p.dead) this.track(dt, p.body.center.x, p.body.center.y, RELOAD_CHASE);
+        if (!p.dead) this.track(dt, p.body.center.x, this.headY(), RELOAD_CHASE);
         this.timer -= dt;
         if (this.timer <= 0) {
           if (inArea) this.startAim(); // once he has you, he keeps going
@@ -160,7 +162,7 @@ export class Sniper {
 
   private fireRifle(): void {
     const p = this.player;
-    const hit = this.ray(this.muzzleX, this.muzzleY, p.body.center.x, p.body.center.y);
+    const hit = this.ray(this.muzzleX, this.muzzleY, p.body.center.x, this.headY());
     this.shotEffects(hit.x, hit.y, 0.008, 180);
     rifleShot(this.scene);
     boltAction(this.scene, RELOAD_TIME * 0.35); // you hear him reload: your window
@@ -213,7 +215,7 @@ export class Sniper {
         return;
       }
       const tx = t ? t.body.center.x : p.body.center.x;
-      const ty = t ? t.body.center.y : p.body.center.y;
+      const ty = t ? t.body.center.y : this.headY();
       this.track(dt, tx, ty, 40);
       this.timer += dt;
       this.burst -= dt;
@@ -255,7 +257,7 @@ export class Sniper {
         return;
       }
     }
-    if (!p.dead && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, p.body.center.y)) this.startFiring(null);
+    if (!p.dead && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, this.headY())) this.startFiring(null);
   }
 
   private startFiring(target: Zombie | null): void {
@@ -272,6 +274,14 @@ export class Sniper {
   }
 
   // ---------------------------------------------------------------- shared
+
+  /**
+   * Soldiers aim at your head. A big crate (~1.6 tiles) hides you only crouched (1.15 tall); standing
+   * (1.8) your head shows over it.
+   */
+  private headY(): number {
+    return this.player.body.top + HEAD_INSET * TILE;
+  }
 
   private playerInArea(): boolean {
     const x = this.player.feetX;
