@@ -15,6 +15,8 @@ import type { Zombie } from './Zombie';
  *    after AIM_TIME -> Reload (RELOAD_TIME, the laser dims but keeps following you) -> Aim...
  *    A crate between you and him takes the bullet, if you CROUCH behind it: he aims at your head, and
  *    standing it shows over the crate. Run during the reload, crate to crate.
+ *  - Mad sniper (def.mad): the reload is random and sometimes he fires twice; the bolt sound is the
+ *    only honest signal. Bullets that hit cover call onCoverHit (the scene breaks wooden crates).
  * Machine gunner ("no mercy"):
  *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it. On you: you are pinned
  *    where you stand (Player.pinned) while he empties GUNNER_PLAYER_TIME of fire into you; no escape. A
@@ -42,6 +44,7 @@ export interface SniperDef {
   tile: [number, number]; // the nest's feet tile (on top of a tower / roof); he faces left
   area: [number, number]; // tile x range where he can spot and shoot the player
   zones: SniperZone[];
+  mad?: boolean; // rifle: random reload (MAD_RELOAD_MIN..MAX, listen for the bolt), sometimes a double shot
 }
 
 enum State {
@@ -59,6 +62,10 @@ const RELOAD_CHASE = 7; // tiles/s it keeps following you while he reloads
 const LOCK_RADIUS = 0.7; // tiles: the dot this close to its target counts as "on you"
 const AIM_TIME = 0.7; // s with the dot on you before the shot
 const RELOAD_TIME = 1.7; // s after a shot: your window
+const MAD_RELOAD_MIN = 1.0; // the mad sniper's reload is random: you can't count it, you have to hear it
+const MAD_RELOAD_MAX = 2.5;
+const MAD_DOUBLE_CHANCE = 0.35; // chance of a second, quick shot
+const MAD_DOUBLE_DELAY = 0.35; // s between the two shots
 const GUNNER_SWEEP = 5; // tiles/s
 const GUNNER_BURST = 0.09; // s between machine-gun shots
 const GUNNER_PLAYER_TIME = 0.9; // s he keeps firing into you (pinned, you can't move) before you fall
@@ -75,6 +82,8 @@ export class Sniper {
   private readonly zombies: Zombie[];
   private readonly covers: Phaser.Geom.Rectangle[];
   private readonly solidAt: (x: number, y: number) => boolean;
+  private readonly onCoverHit: (x: number, y: number) => void; // a bullet hit cover (crates break)
+  private doubleShot = false; // the mad sniper's second shot is coming
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly muzzleX: number;
   private readonly muzzleY: number;
@@ -93,13 +102,14 @@ export class Sniper {
   private hits = new Map<Zombie, number>(); // gunner: s of fire each infected has taken
 
   constructor(scene: Phaser.Scene, def: SniperDef, player: Player, zombies: Zombie[], covers: Phaser.Geom.Rectangle[],
-    solidAt: (x: number, y: number) => boolean) {
+    solidAt: (x: number, y: number) => boolean, onCoverHit: (x: number, y: number) => void) {
     this.scene = scene;
     this.def = def;
     this.player = player;
     this.zombies = zombies;
     this.covers = covers;
     this.solidAt = solidAt;
+    this.onCoverHit = onCoverHit;
     const feetX = (def.tile[0] + 0.5) * TILE;
     const feetY = (def.tile[1] + 1) * TILE;
     const gunner = def.kind === SniperKind.Gunner;
@@ -165,10 +175,18 @@ export class Sniper {
     const hit = this.ray(this.muzzleX, this.muzzleY, p.body.center.x, this.headY());
     this.shotEffects(hit.x, hit.y, 0.008, 180);
     rifleShot(this.scene);
-    boltAction(this.scene, RELOAD_TIME * 0.35); // you hear him reload: your window
+    if (hit.blocked && this.inCover(hit.x, hit.y)) this.onCoverHit(hit.x, hit.y);
     if (!hit.blocked && !p.dead) p.kill(); // in the open: one shot
+    if (this.def.mad && !this.doubleShot && Math.random() < MAD_DOUBLE_CHANCE) { // a second shot, right away
+      this.doubleShot = true;
+      this.state = State.Aim;
+      this.timer = MAD_DOUBLE_DELAY;
+      return;
+    }
+    this.doubleShot = false;
     this.state = State.Reload;
-    this.timer = RELOAD_TIME;
+    this.timer = this.def.mad ? MAD_RELOAD_MIN + Math.random() * (MAD_RELOAD_MAX - MAD_RELOAD_MIN) : RELOAD_TIME;
+    boltAction(this.scene, this.def.mad ? 0.25 : this.timer * 0.35); // you hear him reload: your window
   }
 
   /** Idle laser: glide to a random point of a weighted zone, rest, pick another. */

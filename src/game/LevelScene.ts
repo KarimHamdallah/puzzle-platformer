@@ -12,6 +12,7 @@ import { KEY_TINTS, Locks } from './Locks';
 import { MolotovQuest } from './Molotov';
 import { NoiseKind, NoiseMeter, NoiseSystem } from './Noise';
 import { Player } from './Player';
+import { SmokeQuest } from './Smoke';
 import { Sniper } from './Sniper';
 import { Throwables } from './Throwing';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
@@ -35,6 +36,14 @@ const SUMMON_MIN_DISTANCE = 6; // tiles: when nothing off-screen is on your leve
 const STOMP_NOISE = 4; // tiles
 const CHECKPOINT_OFF = 0x8a8a7a;
 const CHECKPOINT_ON = 0xffa640;
+
+const CRATE_HP = 2; // shots a wooden crate takes before it breaks (M2 Medium)
+
+interface BreakableCrate {
+  rect: Phaser.Geom.Rectangle; // its cover rectangle (removed from covers when it breaks)
+  img: Phaser.GameObjects.Image;
+  hp: number;
+}
 
 interface Checkpoint {
   x: number; // feet position
@@ -131,6 +140,10 @@ export class LevelScene extends Phaser.Scene {
   private noiseMeter!: NoiseMeter;
   private blackout!: Blackout;
   private snipers: Sniper[] = [];
+  private smokeQuest: SmokeQuest | null = null;
+  private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
+  private hudSmoke: Phaser.GameObjects.Image | null = null;
+  private hudSmokeCount: Phaser.GameObjects.Text | null = null;
   private cheating = false; // Hard's cheat key: unlimited bottles + invisible + every door open
   private bottlesBeforeCheat = 0;
   private cheatText: Phaser.GameObjects.Text | null = null;
@@ -182,6 +195,10 @@ export class LevelScene extends Phaser.Scene {
     this.zombieDebug = null;
     this.letter = null;
     this.snipers = [];
+    this.smokeQuest = null;
+    this.crates = [];
+    this.hudSmoke = null;
+    this.hudSmokeCount = null;
     this.dialogue = null;
     this.quest = null;
     this.groupZombies = [];
@@ -211,7 +228,13 @@ export class LevelScene extends Phaser.Scene {
     this.locks.onColouredKey = (c) => { this.progress.keyHeld[c] = true; };
     this.throwables.stashOverride = LEVEL.stashSize;
     const molotovLevel = MAP.some(row => row.includes('V'));
-    if (molotovLevel || LEVEL.intro.length > 0) this.dialogue = new Dialogue(this, this.controls);
+    const smokeLevel = MAP.some(row => row.includes('Y'));
+    if (molotovLevel || smokeLevel || LEVEL.intro.length > 0) this.dialogue = new Dialogue(this, this.controls);
+    if (smokeLevel && this.dialogue) {
+      this.smokeQuest = new SmokeQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.covers,
+        (text, ms) => this.banner(text, ms));
+      this.smokeQuest.setGunnerSeenAt(LEVEL.gunnerSeenAt);
+    }
     if (molotovLevel && this.dialogue) { // the Molotov level
       this.quest = new MolotovQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.locks,
         (text, ms) => this.banner(text, ms));
@@ -227,7 +250,7 @@ export class LevelScene extends Phaser.Scene {
     this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
     for (let i = 0; i < LEVEL.snipers.length; i++) {
       this.snipers.push(new Sniper(this, LEVEL.snipers[i], this.player, this.zombies, this.covers,
-        (x, y) => isStone(Math.floor(x / TILE), Math.floor(y / TILE))));
+        (x, y) => isStone(Math.floor(x / TILE), Math.floor(y / TILE)), (x, y) => this.crateHit(x, y)));
     }
     this.player.canListen = LEVEL.grantsListen || listenUnlocked();
     this.blackout = new Blackout(this, this.player, this.zombies, this.noise, LEVEL.night);
@@ -241,7 +264,7 @@ export class LevelScene extends Phaser.Scene {
     if (this.dialogue && LEVEL.intro.length > 0 && !this.progress.introSeen) { // the level's opening thoughts
       this.progress.introSeen = true;
       const dialogue = this.dialogue;
-      this.time.delayedCall(450, () => dialogue.show(LEVEL.intro, () => this.banner(LEVEL.introBanner, 3200)));
+      this.time.delayedCall(450, () => dialogue.show(LEVEL.intro, () => { if (LEVEL.introBanner) this.banner(LEVEL.introBanner, 3200); }));
     }
     if (DEBUG_ENABLED) this.zombieDebug = new ZombieDebug(this, this.zombies);
 
@@ -263,6 +286,10 @@ export class LevelScene extends Phaser.Scene {
     }
     if (this.quest) {
       this.quest.update(time, this.player);
+      if (this.dialogue && this.dialogue.open) return;
+    }
+    if (this.smokeQuest) {
+      this.smokeQuest.update(time, this.player);
       if (this.dialogue && this.dialogue.open) return;
     }
     if (this.controls.pressed(Action.Back)) {
@@ -288,6 +315,11 @@ export class LevelScene extends Phaser.Scene {
       this.hudColourKeys[c].setAlpha(this.progress.keyHeld[c] ? 1 : 0.22).setVisible(!this.progress.keysUsed);
     }
     if (this.hudMolotov) this.hudMolotov.setVisible(this.throwables.molotovs > 0);
+    if (this.hudSmoke && this.hudSmokeCount) {
+      const n = this.throwables.smokes;
+      this.hudSmoke.setVisible(n > 0);
+      this.hudSmokeCount.setVisible(n > 0).setText('x ' + n);
+    }
     this.noiseMeter.update(deltaMs, this.player.noiseLevel, this.player.stepCount, this.player.landCount, this.noise.masked);
     if (this.zombieDebug) this.zombieDebug.draw(this.player);
   }
@@ -312,6 +344,7 @@ export class LevelScene extends Phaser.Scene {
     this.dropGroupKeys();
     this.locks.fixedUpdate(dt, this.player.body);
     if (this.quest) this.quest.fixedUpdate();
+    if (this.smokeQuest) this.smokeQuest.fixedUpdate(dt);
 
     if (this.finished) return;
     if (!this.player.dead) {
@@ -537,6 +570,12 @@ export class LevelScene extends Phaser.Scene {
         fontFamily: 'Georgia, serif', fontSize: '20px', fontStyle: 'bold', color: '#ff9a40', stroke: '#000000', strokeThickness: 4,
       }).setScrollFactor(0).setDepth(50);
     }
+    if (this.smokeQuest) {
+      this.hudSmoke = this.add.image(48, 168, 'smoke_grenade').setScale(ART_SCALE * 2.2).setScrollFactor(0).setDepth(50).setVisible(false);
+      this.hudSmokeCount = this.add.text(80, 168, '', {
+        fontFamily: 'Georgia, serif', fontSize: '40px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 6,
+      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(50).setVisible(false);
+    }
     if (this.quest) {
       this.hudMolotov = this.add.image(48, 168, 'molotov').setScale(ART_SCALE * 2.2).setScrollFactor(0).setDepth(50).setVisible(false);
     }
@@ -682,6 +721,14 @@ export class LevelScene extends Phaser.Scene {
           case 'W':
             this.addBigCrate(feetX, feetY);
             break;
+          case 'Q': { // concrete: cover that never breaks
+            const img = this.add.image(feetX, feetY, 'concrete').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(12);
+            this.covers.push(new Phaser.Geom.Rectangle(feetX - img.displayWidth / 2, feetY - img.displayHeight, img.displayWidth, img.displayHeight));
+            break;
+          }
+          case 'Y':
+            if (this.smokeQuest) this.smokeQuest.addCache(feetX, feetY);
+            break;
           case 'A':
             this.add.image(feetX, feetY + 2, 'tent').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);
             break;
@@ -762,7 +809,27 @@ export class LevelScene extends Phaser.Scene {
   /** Mechanic 2's big crate (~1.6 tiles): cover from soldiers' fire, and from zombies when crouched. */
   private addBigCrate(feetX: number, feetY: number): void {
     const img = this.add.image(feetX, feetY, 'big_crate').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(12);
-    this.covers.push(new Phaser.Geom.Rectangle(feetX - img.displayWidth / 2, feetY - img.displayHeight, img.displayWidth, img.displayHeight));
+    const rect = new Phaser.Geom.Rectangle(feetX - img.displayWidth / 2, feetY - img.displayHeight, img.displayWidth, img.displayHeight);
+    this.covers.push(rect);
+    if (LEVEL.breakableCrates) this.crates.push({ rect: rect, img: img, hp: CRATE_HP });
+  }
+
+  /** A soldier's bullet hit cover at (x, y): a wooden crate cracks, then breaks (no longer cover). */
+  private crateHit(x: number, y: number): void {
+    for (let i = 0; i < this.crates.length; i++) {
+      const c = this.crates[i];
+      if (c.hp <= 0 || !Phaser.Geom.Rectangle.Contains(Phaser.Geom.Rectangle.Inflate(Phaser.Geom.Rectangle.Clone(c.rect), 6, 6), x, y)) continue;
+      c.hp--;
+      if (c.hp > 0) {
+        c.img.setTexture('big_crate_cracked');
+      } else {
+        c.img.setTexture('big_crate_broken').setDepth(4);
+        const idx = this.covers.indexOf(c.rect);
+        if (idx >= 0) this.covers.splice(idx, 1);
+        this.cameras.main.shake(120, 0.004);
+      }
+      return;
+    }
   }
 
   /** Two stacked crates (1.5 tiles tall), drawn IN FRONT of the player; crouching inside the area hides you. */

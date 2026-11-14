@@ -32,6 +32,8 @@ const THUMB_M1_HARD = 'thumb_m1_hard';
 const THUMB_M1_HARD_PATH = 'assets/thumbs/mechanic1_hard.png';
 const THUMB_M2_EASY = 'thumb_m2_easy';
 const THUMB_M2_EASY_PATH = 'assets/thumbs/mechanic2_easy.webp';
+const THUMB_M2_MEDIUM = 'thumb_m2_medium';
+const THUMB_M2_MEDIUM_PATH = 'assets/thumbs/mechanic2_medium.png';
 
 const SECTIONS: MenuSection[] = [
   {
@@ -55,7 +57,7 @@ const SECTIONS: MenuSection[] = [
     subheading: 'The army shoots anything that moves. Read the laser, move between shots, let the infected draw the fire.',
     levels: [
       { scene: 'Level', level: 3, label: 'EASY', title: 'The Tower', blurb: 'A sniper tower, then a machine gun.', thumb: THUMB_M2_EASY },
-      { scene: '', level: 0, label: 'MEDIUM', title: 'Coming soon', blurb: 'Cover that breaks. A mad sniper. Clickers.', thumb: '' },
+      { scene: 'Level', level: 4, label: 'MEDIUM', title: 'Smoke', blurb: 'Cover breaks. He reloads at random. Steal smoke.', thumb: THUMB_M2_MEDIUM },
       { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Snipers in the dark. Listen.', thumb: '' },
     ],
   },
@@ -102,6 +104,7 @@ export class MenuScene extends Phaser.Scene {
     this.load.image(THUMB_M1_MEDIUM, THUMB_M1_MEDIUM_PATH);
     this.load.image(THUMB_M1_HARD, THUMB_M1_HARD_PATH);
     this.load.image(THUMB_M2_EASY, THUMB_M2_EASY_PATH);
+    this.load.image(THUMB_M2_MEDIUM, THUMB_M2_MEDIUM_PATH);
   }
 
   create(): void {

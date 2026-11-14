@@ -11,6 +11,7 @@ Usage: python -I draw_player.py <out_dir> [preview_dir]
 """
 import math
 import os
+import random
 import sys
 from PIL import Image
 
@@ -99,6 +100,12 @@ PALETTE = {
     '>': (112, 76, 46),    # crate wood shade
     '?': (70, 46, 28),     # crate gaps
     '/': (66, 62, 58),     # newsprint ink
+    # Mechanic 2 Medium
+    '^': (150, 148, 140),  # concrete
+    '~': (112, 110, 104),  # concrete shade
+    ';': (88, 104, 70),    # army green paint
+    ':': (62, 76, 50),     # army green shade
+    ',': (220, 210, 150),  # stencil
 }
 
 
@@ -599,6 +606,82 @@ def draw_big_crate_sprite():
     return c.image().crop((x0 - 1, y0 - 1, x1 + 2, y1 + 2))
 
 
+def draw_big_crate_damaged(broken):
+    """The big crate after one hit (cracked, splintered hole) or two (broken: a low pile of planks)."""
+    if not broken:
+        out = draw_big_crate_sprite()               # the same crate, with a bullet hole punched in it
+        dark = (34, 22, 14, 255)
+        rnd = random.Random(7)
+        for y in range(12, 26):                     # a jagged hole where the bullet went through
+            half = 6 - abs(y - 19) * 0.6 + rnd.uniform(-1.2, 1.2)
+            for x in range(int(26 - half), int(26 + half) + 1):
+                out.putpixel((x, y), dark)
+        for (x0, y0, dx, dy, n) in ((31, 14, 1, -1, 9), (21, 24, -1, 1, 10), (32, 22, 1, 1, 8), (20, 14, -1, -1, 7)):
+            x, y = x0, y0                           # cracks running out of it
+            for i in range(n):
+                out.putpixel((x, y), dark)
+                x += dx if i % 3 != 2 else 0
+                y += dy if i % 3 != 1 else 0
+        for (x, y) in ((19, 18), (33, 19), (25, 11), (27, 27), (22, 12), (30, 25)):
+            out.putpixel((x, y), (200, 150, 96, 255))    # splinters
+        return out
+    c = Canvas()
+    gy = 91
+    c.rect(6, gy - 6, 50, gy, '<'); c.row(gy - 6, 6, 50, '>')
+    c.stroke((10, gy - 7), (30, gy - 14), 3, '<')
+    c.stroke((28, gy - 6), (46, gy - 12), 3, '>')
+    c.rect(36, gy - 9, 44, gy - 7, '<')
+    for x in range(8, 50, 7):
+        c.put(x, gy - 3, '?')
+    c.outline()
+    return c.image().crop((3, gy - 17, 56, gy + 2))
+
+
+def draw_concrete_sprite():
+    """Unbreakable cover: a cracked concrete barrier block, 52x50 px."""
+    c = Canvas()
+    x0, y0, x1, y1 = 4, 42, 55, 91
+    c.rect(x0, y0 + 6, x1, y1, '^')
+    for i in range(6):                              # sloped top
+        c.row(y0 + i, x0 + 6 - i, x1 - 6 + i, '^')
+    c.rect(x1 - 6, y0 + 4, x1, y1, '~')
+    c.row(y1, x0, x1, '~')
+    for (x, y) in ((18, 60), (19, 61), (20, 63), (20, 64), (21, 66), (38, 70), (39, 71), (41, 72), (30, 80), (31, 82)):
+        c.put(x, y, '~')
+    c.rect(12, 72, 14, 74, '5'); c.rect(44, 52, 46, 54, '5')     # rebar stubs
+    c.outline()
+    return c.image().crop((x0 - 1, y0 - 1, x1 + 2, y1 + 2))
+
+
+def draw_ammo_crate_sprite(opened):
+    """Army supply crate (the smoke grenades), 40x22 px; opened = lid off, grenades gone."""
+    c = Canvas()
+    x0, y0, x1, y1 = 4, 72, 43, 91
+    c.rect(x0, y0, x1, y1, ';')
+    c.rect(x0, y1 - 2, x1, y1, ':'); c.rect(x0, y0, x0 + 1, y1, ':'); c.rect(x1 - 1, y0, x1, y1, ':')
+    c.rect(x0 + 6, y0 + 3, x0 + 8, y1 - 3, ':'); c.rect(x1 - 8, y0 + 3, x1 - 6, y1 - 3, ':')   # straps
+    for x in range(x0 + 13, x1 - 12, 3):            # stencil
+        c.rect(x, y0 + 7, x + 1, y0 + 11, ',')
+    if opened:
+        c.rect(x0 + 2, y0, x1 - 2, y0 + 2, 'K')     # dark inside
+        c.stroke((x1, y0 - 1), (x1 + 6, y0 - 9), 2, ';')   # lid leaning
+    else:
+        c.rect(x0 - 1, y0 - 2, x1 + 1, y0, ':')     # lid
+        c.rect(x0 + 16, y0 + 1, x0 + 22, y0 + 2, '5')       # latch
+    c.outline()
+    return c.image().crop((x0 - 2, y0 - 11, x1 + 9, y1 + 2))
+
+
+def draw_smoke_grenade_sprite():
+    """A smoke grenade (projectile + HUD icon): green can with a pin, 9x14 px."""
+    c = Canvas()
+    c.rect(2, 4, 6, 12, ';'); c.rect(2, 4, 2, 12, ':')
+    c.row(7, 2, 6, ','); c.row(9, 2, 6, ',')        # bands
+    c.rect(3, 2, 5, 3, '5'); c.rect(6, 1, 7, 2, '5')    # cap + lever
+    c.outline()
+    return c.image().crop((0, 0, 9, 14))
+
+
 def draw_sandbags(c, x0, x1, top):
     """Rows of sandbags from `top` down to y 91, staggered."""
     for r, y in enumerate(range(top, 91, 5)):
@@ -745,6 +828,23 @@ def main():
     draw_dead_soldier_sprite().save(os.path.join(out_dir, 'dead_soldier.png'))
     draw_newspaper_sprite().save(os.path.join(out_dir, 'newspaper.png'))
     draw_scaffold_sprite().save(os.path.join(out_dir, 'scaffold.png'))
+    draw_big_crate_damaged(False).save(os.path.join(out_dir, 'big_crate_cracked.png'))
+    draw_big_crate_damaged(True).save(os.path.join(out_dir, 'big_crate_broken.png'))
+    draw_concrete_sprite().save(os.path.join(out_dir, 'concrete.png'))
+    draw_ammo_crate_sprite(False).save(os.path.join(out_dir, 'ammo_crate.png'))
+    draw_ammo_crate_sprite(True).save(os.path.join(out_dir, 'ammo_crate_open.png'))
+    draw_smoke_grenade_sprite().save(os.path.join(out_dir, 'smoke_grenade.png'))
+    if preview_dir:
+        items = [draw_big_crate_sprite(), draw_big_crate_damaged(False), draw_big_crate_damaged(True), draw_concrete_sprite(),
+                 draw_ammo_crate_sprite(False), draw_ammo_crate_sprite(True), draw_smoke_grenade_sprite()]
+        pw = sum(i.width for i in items) + 10 * len(items)
+        ph = max(i.height for i in items)
+        prev = Image.new('RGBA', (pw, ph), (90, 96, 110, 255))
+        x = 0
+        for i in items:
+            prev.alpha_composite(i, (x, ph - i.height))
+            x += i.width + 10
+        prev.resize((pw * 4, ph * 4), Image.NEAREST).save(os.path.join(preview_dir, 'm2m_props_preview.png'))
     if preview_dir:
         items = [draw_big_crate_sprite(), draw_nest_sprite(False), draw_nest_sprite(True), draw_tent_sprite(),
                  draw_campfire_sprite(), draw_dead_soldier_sprite(), draw_newspaper_sprite()]
