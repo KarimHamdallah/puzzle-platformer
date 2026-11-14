@@ -17,7 +17,7 @@ import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 //   #  solid ground          P  player spawn          K  checkpoint        E  exit
 //   C  Clicker (post)        c  Clicker (patrols)     R  Runner            S  Screamer (faces left)
 //   x  bottle stash          B  cover crate (crouch behind it to hide)
-//   D  locked door (bottom tile, 3 tiles tall; its key is carried by a KEY_GUARDIANS zombie)
+//   D  locked door (bottom tile, 3 tiles tall; keys carried by KEY_GUARDIANS zombies, DOOR_KEYS for more than 1)
 //   b  box (decor)           o  stone (decor)        L  the father's letter (dead man against the wall to his right)
 const MAP: string[] = [
   '#......................................................................................................................................................................................................#',
@@ -56,14 +56,21 @@ const MAP_W = MAP[0].length;
 const MAP_H = MAP.length;
 
 /**
- * Key guardians (tile x, y of the zombie in MAP). Each one carries the key of the locked door ('D') that
+ * Key guardians (tile x, y of the zombie in MAP). Each one carries a key for the locked door ('D') that
  * ends its section, so no section can be skipped: lure / take down / stomp + punch to get through.
  */
 const KEY_GUARDIANS: [number, number][] = [
   [25, 25], // A: the tunnel Clicker            -> door at the tunnel exit
   [61, 25], // B: the yard Runner               -> door in the yard's wall
-  [112, 17], // C: the top-floor Clicker        -> door out onto the rooftops
+  [105, 25], // C: the ground-floor Clicker     \
+  [110, 21], // C: the floor-2 Clicker           > all three -> door out onto the rooftops
+  [112, 17], // C: the floor-3 Clicker          /
   [192, 17], // D: the Screamer                 -> door to the exit
+];
+
+/** Doors that take more than one key (tile x, y of the 'D' in MAP, keys). Every other door takes 1. */
+const DOOR_KEYS: [number, number, number][] = [
+  [130, 17, 3], // the building's exit: one key per floor, so no floor's Clicker can be sneaked past
 ];
 const RESTART_DELAY = 700; // ms between being caught and the level restarting
 const STOMP_DEPTH = 22; // px: how far into a Runner's head the feet may be and still count as a stomp
@@ -103,6 +110,12 @@ const PARALLAX: [string, number][] = [
 function isSolid(x: number, y: number): boolean {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true; // outside the map counts as wall
   return MAP[y][x] === '#';
+}
+
+/** Keys the door at tile (x, y) takes. */
+function doorKeys(x: number, y: number): number {
+  for (let i = 0; i < DOOR_KEYS.length; i++) if (DOOR_KEYS[i][0] === x && DOOR_KEYS[i][1] === y) return DOOR_KEYS[i][2];
+  return 1;
 }
 
 /** First floor row at or below fromRow in column x with 2 free tiles above it, or -1. */
@@ -483,7 +496,7 @@ export class DemoScene extends Phaser.Scene {
             this.throwables.addPickup(feetX, feetY);
             break;
           case 'D':
-            this.locks.addDoor(feetX, feetY);
+            this.locks.addDoor(feetX, feetY, doorKeys(x, y));
             break;
           case 'B':
             this.addCoverCrate(feetX, feetY);

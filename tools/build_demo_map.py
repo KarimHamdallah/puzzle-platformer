@@ -104,7 +104,8 @@ fill(94, 14, 130, 14)           # building roof: floor 3 interior rows 15..17 (c
 put(106, 17, 'B')
 put(112, 17, 'C')               # floor-3 Clicker at its post, facing left; carries key 3
 put(121, 17, 'B')
-put(130, 17, 'D')               # locked door 3: floor 3 -> rooftops (the street has no way up)
+put(130, 17, 'D')               # locked door 3: floor 3 -> rooftops (the street has no way up). Takes 3 keys,
+#                                 one from each floor's Clicker (DemoScene DOOR_KEYS): no floor can be skipped
 
 # ---- D: rooftops (x 130..199) -------------------------------------------------------------
 # Open rooftops with a Runner and crates, then the Screamer inside a low shack guarding the exit:

@@ -8,7 +8,9 @@ const LOCKED_MESSAGE_COOLDOWN = 1.5; // s
 interface Door {
   zone: Phaser.GameObjects.Zone; // the static body that blocks the way
   image: Phaser.GameObjects.Image;
+  label: Phaser.GameObjects.Container | null; // "key x N" over doors that need more than one key
   rect: Phaser.Geom.Rectangle;
+  need: number; // keys it takes
   open: boolean;
 }
 
@@ -24,7 +26,9 @@ interface KeyPickup {
  * key and drops it when it dies, so no encounter can be skipped.
  *  - A door is a real static body in the level's solids: it blocks the player AND the zombies, and the
  *    player's corner correction / the zombies' wall probes see it like any wall.
- *  - Walking into a door with a key opens it (one key per door).
+ *  - Walking into a door with enough keys opens it. Most doors take one key; a door after an area with
+ *    several guardians takes one key from each of them (its "key x N" sign says so), so none of them
+ *    can be sneaked past.
  */
 export class Locks {
   keys = 0;
@@ -44,13 +48,23 @@ export class Locks {
     }).setOrigin(0.5, 1).setDepth(30).setAlpha(0);
   }
 
-  /** feetX / feetY: bottom centre of the door's lowest tile. */
-  addDoor(feetX: number, feetY: number): void {
+  /** feetX / feetY: bottom centre of the door's lowest tile. need: keys it takes to open. */
+  addDoor(feetX: number, feetY: number, need: number): void {
     const h = DOOR_HEIGHT * TILE;
     const zone = this.scene.add.zone(feetX, feetY - h / 2, TILE, h);
     this.solids.add(zone);
     const image = this.scene.add.image(feetX, feetY, 'door').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(3);
-    this.doors.push({ zone: zone, image: image, rect: new Phaser.Geom.Rectangle(feetX - TILE / 2, feetY - h, TILE, h), open: false });
+    let label: Phaser.GameObjects.Container | null = null;
+    if (need > 1) { // painted on the door's upper plate: key icon + "x N"
+      const key = this.scene.add.image(-14, 0, 'key').setScale(ART_SCALE);
+      const count = this.scene.add.text(12, 0, 'x' + need, {
+        fontFamily: 'Georgia, serif', fontSize: '22px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0, 0.5);
+      label = this.scene.add.container(feetX - 4, feetY - h + TILE * 0.45, [key, count]).setDepth(4);
+    }
+    this.doors.push({
+      zone: zone, image: image, label: label, rect: new Phaser.Geom.Rectangle(feetX - TILE / 2, feetY - h, TILE, h), need: need, open: false,
+    });
   }
 
   /** A guardian died: its key falls where it stood. */
@@ -85,12 +99,13 @@ export class Locks {
       const r = d.rect;
       const touching = b.right + TOUCH_MARGIN > r.x && b.left - TOUCH_MARGIN < r.right && b.bottom > r.y && b.top < r.bottom;
       if (!touching) continue;
-      if (this.keys > 0) {
-        this.keys--;
+      if (this.keys >= d.need) {
+        this.keys -= d.need;
         this.openDoor(d);
       } else if (this.messageCooldown <= 0) {
         this.messageCooldown = LOCKED_MESSAGE_COOLDOWN;
-        this.message.setPosition(r.centerX, r.y - 10).setAlpha(1);
+        const text = d.need === 1 ? 'LOCKED - its guardian has the key' : 'LOCKED - needs ' + d.need + ' keys (' + this.keys + '/' + d.need + ')';
+        this.message.setText(text).setPosition(r.centerX, r.y - 10).setAlpha(1);
         this.scene.tweens.killTweensOf(this.message);
         this.scene.tweens.add({ targets: this.message, alpha: 0, delay: 900, duration: 400 });
       }
@@ -101,6 +116,8 @@ export class Locks {
     d.open = true;
     this.solids.remove(d.zone, true, true); // the static body is gone: the way is open
     this.scene.cameras.main.shake(120, 0.004);
-    this.scene.tweens.add({ targets: d.image, y: d.image.y - DOOR_HEIGHT * TILE, alpha: 0, duration: 450, ease: 'Quad.easeIn' });
+    const targets: Phaser.GameObjects.GameObject[] = [d.image];
+    if (d.label) targets.push(d.label);
+    this.scene.tweens.add({ targets: targets, y: '-=' + DOOR_HEIGHT * TILE, alpha: 0, duration: 450, ease: 'Quad.easeIn' });
   }
 }
