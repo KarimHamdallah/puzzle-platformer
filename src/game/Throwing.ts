@@ -69,6 +69,7 @@ interface Pickup {
  */
 export class Throwables {
   count: number;
+  stashOverride = 0; // bottles per stash for this level (0 = THROW.stashSize)
   molotovs = 0;
   onMolotov: ((x: number, y: number) => void) | null = null;
   /** The infected, so bottles (and the aim preview) can hit them; the scene fills this. */
@@ -86,7 +87,7 @@ export class Throwables {
     this.scene = scene;
     this.physics = scene.physics;
     this.count = startCount;
-    this.aimGfx = scene.add.graphics().setDepth(16);
+    this.aimGfx = scene.add.graphics().setDepth(43); // above the Hard level's night
 
     if (!scene.textures.exists('shard')) {
       const g = scene.make.graphics({ x: 0, y: 0 }, false);
@@ -173,7 +174,7 @@ export class Throwables {
       const p = this.pickups[i];
       const near = p.x > playerBody.left - r && p.x < playerBody.right + r && p.y > playerBody.top && p.y < playerBody.bottom + r;
       if (near) {
-        this.count += THROW.stashSize;
+        this.count += this.stashOverride > 0 ? this.stashOverride : THROW.stashSize;
         p.sprite.destroy();
         p.glow.destroy();
         this.pickups.splice(i, 1);

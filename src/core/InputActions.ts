@@ -13,6 +13,7 @@ export enum Action {
   Attack, // melee: stunned Runners, takedowns from behind
   Reset,
   Back, // leave the level for the level select
+  Listen, // hold: Listen Mode (Hard level's upgrade)
   DevKey, // debug builds: give the next coloured key
   DevRag, // debug builds: give the rag
   Count, // number of actions, keep last
@@ -42,6 +43,7 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['KeyJ', Action.Attack],
   ['KeyR', Action.Reset],
   ['Escape', Action.Back],
+  ['KeyQ', Action.Listen],
   ['Digit1', Action.DevKey],
   ['Digit2', Action.DevRag],
 ]);

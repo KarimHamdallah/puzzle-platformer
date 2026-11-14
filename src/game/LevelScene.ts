@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { DEBUG_ENABLED } from '../core/Debug';
 import { Action, InputActions } from '../core/InputActions';
 import { createAnimations, loadAssets } from './Assets';
+import { Blackout } from './Blackout';
 import { CameraRig } from './CameraRig';
 import { ART_SCALE, TILE } from './constants';
 import { Dialogue } from './Dialogue';
@@ -28,6 +29,7 @@ const SUMMON_MARGIN = 2; // tiles past the screen edge where summoned Runners ap
 const SUMMON_SPACING = 2; // tiles between them
 const SUMMON_SEARCH = 30; // tiles searched outward for a floor on the player's level
 const SUMMON_MAX = 4; // summoned Runners alive at once
+const LISTEN_UNLOCK_KEY = 'upgrade:listen'; // localStorage: Listen Mode earned (Hard finished)
 const SUMMON_MIN_DISTANCE = 6; // tiles: when nothing off-screen is on your level, they appear at least this far
 const STOMP_NOISE = 4; // tiles
 const CHECKPOINT_OFF = 0x8a8a7a;
@@ -72,6 +74,22 @@ function doorKeys(x: number, y: number): number {
   return 1;
 }
 
+function listenUnlocked(): boolean {
+  try {
+    return localStorage.getItem(LISTEN_UNLOCK_KEY) === '1';
+  } catch {
+    return false; // storage blocked: the upgrade only exists in the Hard level
+  }
+}
+
+function unlockListen(): void {
+  try {
+    localStorage.setItem(LISTEN_UNLOCK_KEY, '1');
+  } catch {
+    // storage blocked: nothing to remember
+  }
+}
+
 /** First floor row at or below fromRow in column x with 2 free tiles above it, or -1. */
 function floorUnder(x: number, fromRow: number): number {
   for (let y = Math.max(2, fromRow); y < MAP_H; y++) {
@@ -102,6 +120,7 @@ export class LevelScene extends Phaser.Scene {
   private hudColourKeys: Phaser.GameObjects.Image[] = [];
   private hudMolotov: Phaser.GameObjects.Image | null = null;
   private noiseMeter!: NoiseMeter;
+  private blackout!: Blackout;
   private summoned: Zombie[] = []; // Runners called in by Screamers
   private world!: Phaser.Physics.Arcade.World;
   private hudCount!: Phaser.GameObjects.Text;
@@ -176,8 +195,10 @@ export class LevelScene extends Phaser.Scene {
     this.throwables = new Throwables(this, this.startBottles);
     this.locks = new Locks(this, solids);
     this.locks.onColouredKey = (c) => { this.progress.keyHeld[c] = true; };
-    if (MAP.some(row => row.includes('V'))) { // the Molotov level
-      this.dialogue = new Dialogue(this, this.controls);
+    this.throwables.stashOverride = LEVEL.stashSize;
+    const molotovLevel = MAP.some(row => row.includes('V'));
+    if (molotovLevel || LEVEL.intro.length > 0) this.dialogue = new Dialogue(this, this.controls);
+    if (molotovLevel && this.dialogue) { // the Molotov level
       this.quest = new MolotovQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.locks,
         (text, ms) => this.banner(text, ms));
     }
@@ -190,7 +211,20 @@ export class LevelScene extends Phaser.Scene {
     for (let i = 0; i < this.zombies.length; i++) this.physics.add.collider(this.zombies[i].body, solids);
 
     this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
+    this.player.canListen = LEVEL.grantsListen || listenUnlocked();
+    this.blackout = new Blackout(this, this.player, this.zombies, this.noise, LEVEL.night);
+    for (let i = 0; i < LEVEL.hints.length; i++) {
+      const h = LEVEL.hints[i];
+      this.add.text(h[0] * TILE, h[1] * TILE, h[2], { // above the night: hints stay readable
+        fontFamily: 'Georgia, serif', fontSize: '26px', fontStyle: 'italic', color: '#f0e6c8', stroke: '#000000', strokeThickness: 5,
+      }).setOrigin(0.5).setDepth(41);
+    }
     this.createHud();
+    if (this.dialogue && LEVEL.intro.length > 0 && !this.progress.introSeen) { // the level's opening thoughts
+      this.progress.introSeen = true;
+      const dialogue = this.dialogue;
+      this.time.delayedCall(450, () => dialogue.show(LEVEL.intro, () => this.banner(LEVEL.introBanner, 3200)));
+    }
     if (DEBUG_ENABLED) this.zombieDebug = new ZombieDebug(this, this.zombies);
 
     this.world.on(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
@@ -224,6 +258,7 @@ export class LevelScene extends Phaser.Scene {
     this.throwables.update(time);
     this.noise.update(deltaMs);
     this.cameraRig.update(deltaMs);
+    this.blackout.update(deltaMs);
 
     const scrollX = this.cameras.main.scrollX;
     for (let i = 0; i < this.parallax.length; i++) this.parallax[i].tilePositionX = scrollX * PARALLAX[i][1];
@@ -233,7 +268,7 @@ export class LevelScene extends Phaser.Scene {
       this.hudColourKeys[c].setAlpha(this.progress.keyHeld[c] ? 1 : 0.22).setVisible(!this.progress.keysUsed);
     }
     if (this.hudMolotov) this.hudMolotov.setVisible(this.throwables.molotovs > 0);
-    this.noiseMeter.update(deltaMs, this.player.noiseLevel, this.player.stepCount, this.player.landCount);
+    this.noiseMeter.update(deltaMs, this.player.noiseLevel, this.player.stepCount, this.player.landCount, this.noise.masked);
     if (this.zombieDebug) this.zombieDebug.draw(this.player);
   }
 
@@ -374,6 +409,7 @@ export class LevelScene extends Phaser.Scene {
     if (this.exit && Math.abs(p.feetX - this.exit.x) < TILE * 0.6 && Math.abs(p.feetY - this.exit.y) < TILE * 2) {
       this.finished = true;
       this.banner('YOU MADE IT', 2500);
+      if (LEVEL.grantsListen) unlockListen(); // the upgrade now works in every level
       this.time.delayedCall(2600, () => this.toMenu());
     }
   }
@@ -417,6 +453,7 @@ export class LevelScene extends Phaser.Scene {
   private shutdown(): void {
     this.world.off(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
     if (this.zombieDebug) this.zombieDebug.destroy();
+    this.blackout.destroy();
     this.throwables.destroy();
     this.cameraRig.destroy();
     this.player.destroy();
@@ -456,7 +493,8 @@ export class LevelScene extends Phaser.Scene {
       this.hudMolotov = this.add.image(48, 168, 'molotov').setScale(ART_SCALE * 2.2).setScrollFactor(0).setDepth(50).setVisible(false);
     }
     this.add.text(24, this.scale.height - 20,
-      'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Read / look ↑   Checkpoint R   Levels Esc', {
+      'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Read / look ↑'
+      + (this.player.canListen ? '   Listen Q (hold)' : '') + '   Checkpoint R   Levels Esc', {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }

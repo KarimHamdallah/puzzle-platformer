@@ -44,18 +44,24 @@ const RING_WIDTH = [2, 3, 4, 5, 4];
  */
 export class NoiseSystem {
   heard: Noise[] = [];
+  maskTimer = 0; // s: thunder drowns out the player's footsteps and landings while > 0
 
   private queued: Noise[] = [];
   private readonly rings: Ring[] = [];
   private readonly gfx: Phaser.GameObjects.Graphics;
 
   constructor(scene: Phaser.Scene) {
-    this.gfx = scene.add.graphics().setDepth(15);
+    this.gfx = scene.add.graphics().setDepth(42); // above the Hard level's night (40)
+  }
+
+  get masked(): boolean {
+    return this.maskTimer > 0;
   }
 
   /** radiusTiles: how far it carries. */
   emit(x: number, y: number, radiusTiles: number, kind: NoiseKind): void {
     if (radiusTiles <= 0) return;
+    if (this.masked && (kind === NoiseKind.Footstep || kind === NoiseKind.Landing)) return; // thunder
     const radius = radiusTiles * TILE;
     this.queued.push({ x: x, y: y, radius: radius, kind: kind });
     if (RING_SHOWN[kind]) this.rings.push({ x: x, y: y, radius: radius, age: 0, duration: RING_TIME[kind], colour: RING_COLOUR[kind], width: RING_WIDTH[kind] });
@@ -69,6 +75,7 @@ export class NoiseSystem {
 
   /** Rings, once per rendered frame. */
   update(deltaMs: number): void {
+    this.maskTimer = Math.max(0, this.maskTimer - deltaMs / 1000);
     const g = this.gfx;
     g.clear();
     for (let i = this.rings.length - 1; i >= 0; i--) {
@@ -89,6 +96,7 @@ export class NoiseSystem {
 const METER_ARCS = [0, 2, 3]; // waves per noise level (silent, walking, running)
 const METER_COLOURS = [0xf0e6c8, 0xf0e6c8, 0xff9a40];
 const LANDING_COLOUR = 0xff5a48;
+const MASKED_COLOUR = 0x8fb4ff; // thunder: you are moving, but nobody can hear it
 const PULSE_TIME = 0.28; // s: a step's waves pop, then settle
 const LANDING_TIME = 0.45;
 
@@ -114,8 +122,8 @@ export class NoiseMeter {
     this.waves = scene.add.graphics().setScrollFactor(0).setDepth(50);
   }
 
-  /** Once per frame. level: 0 silent, 1 walking, 2 running; steps / landings: running counts. */
-  update(deltaMs: number, level: number, steps: number, landings: number): void {
+  /** Once per frame. level: 0 silent, 1 walking, 2 running; steps / landings: running counts; masked: thunder. */
+  update(deltaMs: number, level: number, steps: number, landings: number, masked: boolean): void {
     const dt = deltaMs / 1000;
     if (steps !== this.lastSteps) this.pulse = 1;
     if (landings !== this.lastLandings) this.landing = 1;
@@ -129,7 +137,7 @@ export class NoiseMeter {
     g.clear();
     const landing = this.landing > 0;
     const arcs = landing ? 3 : METER_ARCS[level];
-    const colour = landing ? LANDING_COLOUR : METER_COLOURS[level];
+    const colour = masked ? MASKED_COLOUR : landing ? LANDING_COLOUR : METER_COLOURS[level];
     const pop = landing ? this.landing : this.pulse;
     for (let i = 0; i < arcs; i++) {
       const r = 14 + i * 11 + pop * 4;

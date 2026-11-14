@@ -183,6 +183,11 @@ export class Zombie {
     return this.body.center.x;
   }
 
+  /** The sprite, for effects that copy its look (Listen Mode silhouettes). */
+  get view(): Phaser.GameObjects.Sprite {
+    return this.sprite;
+  }
+
   get feetY(): number {
     return this.body.bottom;
   }

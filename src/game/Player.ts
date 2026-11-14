@@ -105,6 +105,8 @@ export class Player {
   crouched = false;
   crouchWanted = false; // crouch is a TOGGLE: one press of Down / S / C
   hidden = false; // crouched behind cover: sighted enemies cannot see him
+  canListen = false; // Listen Mode unlocked (Hard level, then every level once Hard is finished)
+  listening = false; // holding Listen: frozen, crouched, silent (the scene draws what he hears)
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
   landCount = 0; // loud landings so far
   dead = false;
@@ -224,8 +226,12 @@ export class Player {
       if (onGround && !this.aiming) this.crouchWanted = !this.crouchWanted;
     }
     if (!onGround || this.input.held(Action.Sprint) || this.input.held(Action.Throw)) this.crouchWanted = false;
-    if (this.crouchWanted && !this.crouched) this.setCrouched(true);
-    else if (!this.crouchWanted && this.crouched && this.canStand()) this.setCrouched(false);
+    // Listen Mode: hold on the ground to freeze in a crouch (still hidden behind cover, silent).
+    this.listening = this.canListen && onGround && this.input.held(Action.Listen) && !this.aiming
+      && this.throwTimer <= 0 && this.attackTimer <= 0;
+    const crouchNow = this.crouchWanted || this.listening;
+    if (crouchNow && !this.crouched) this.setCrouched(true);
+    else if (!crouchNow && this.crouched && this.canStand()) this.setCrouched(false);
 
     this.updateThrow(dt, onGround);
     this.updateAttack(dt, onGround);
@@ -234,7 +240,7 @@ export class Player {
     let gaitSpeed = T.walkSpeed;
     if (this.crouched) gaitSpeed = T.sneakSpeed;
     else if (this.input.held(Action.Sprint)) gaitSpeed = T.sprintSpeed;
-    const locked = this.aiming || this.throwTimer > 0 || this.attackTimer > 0;
+    const locked = this.aiming || this.throwTimer > 0 || this.attackTimer > 0 || this.listening;
     const target = locked ? 0 : this.input.moveX * gaitSpeed * TILE;
     let vx = b.velocity.x;
     let time: number;
