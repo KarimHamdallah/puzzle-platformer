@@ -18,7 +18,7 @@ import type { Zombie } from './Zombie';
  *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it: you die in a blink, a
  *    zombie takes him GUNNER_KILL_TIME to cut down, pinned down meanwhile (it can't move or grab: run
  *    right past it). Lure an infected into his ground and run while he is busy with it.
- * Shots are flashes, a camera shake, the laser line and synthesised sound (Sfx.ts); no bullets in flight.
+ * Shots are flashes, a camera shake, the laser line and recorded gunshots (Sfx.ts); no bullets in flight.
  */
 
 export enum SniperKind {
@@ -56,7 +56,7 @@ const CHASE_SPEED = 11; // tiles/s the laser chases you (you sprint at 8.5)
 const RELOAD_CHASE = 7; // tiles/s it keeps following you while he reloads
 const LOCK_RADIUS = 0.7; // tiles: the dot this close to its target counts as "on you"
 const AIM_TIME = 0.7; // s with the dot on you before the shot
-const RELOAD_TIME = 1.4; // s after a shot: your window
+const RELOAD_TIME = 1.7; // s after a shot: your window
 const GUNNER_SWEEP = 5; // tiles/s
 const GUNNER_BURST = 0.09; // s between machine-gun shots
 const GUNNER_REACTION = 0.15; // s before the first burst hits you

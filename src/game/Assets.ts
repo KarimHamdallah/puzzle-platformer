@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { SFX_FILES } from './Sfx';
 
 /**
  * Every texture and animation the game uses, in one place.
@@ -83,6 +84,7 @@ export function loadAssets(scene: Phaser.Scene): void {
   // Exclusion Zone tileset recoloured from blue-purple to olive stone / dark earth to match the
   // Postapocalypse backgrounds (colour-for-colour swap of its 8-colour palette).
   scene.load.image('tileset', 'assets/craftpix/tiles/tileset_olive.png');
+  for (let i = 0; i < SFX_FILES.length; i++) scene.load.audio(SFX_FILES[i][0], SFX_FILES[i][1]);
   scene.load.spritesheet('fire', 'assets/player/fire.png', { frameWidth: 32, frameHeight: 48 }); // drawn flames, 8 frames
 }
 

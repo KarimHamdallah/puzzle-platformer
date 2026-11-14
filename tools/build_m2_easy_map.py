@@ -10,7 +10,7 @@ in the margin says how to survive.
      laser wander before you step out.
   area 1, the tower (x 14..68): a rifle sniper on a tower at the right end. Step into his area and he
      has you: his laser chases you faster than you run, he fires 0.7 s after the dot reaches you, then
-     reloads for 1.4 s. Big crates every 7 tiles take his bullets: let him hit the crate, run while he
+     reloads for 1.7 s. Big crates every 7 tiles take his bullets: let him hit the crate, run while he
      reloads. Outside his area the laser wanders (lower path 90%, scaffolding 10%). A doorway under the
      tower leads on (he can't see under himself).
   area 2, the machine gun (x 69..123): a gunner on a roof watches an open stretch (x 90..98) and kills
