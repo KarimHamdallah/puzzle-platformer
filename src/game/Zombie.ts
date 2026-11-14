@@ -108,6 +108,7 @@ export class Zombie {
   targetX = 0; // Investigate / Hunt / Chase / Return destination
   health: number;
   distracted = false; // Clicker: busy with a bottle / scream (the only time it can be taken down)
+  hasKey = false; // guardian: drops the key of a locked door when it dies (the scene drops it)
 
   private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
   private readonly sprite: Phaser.GameObjects.Sprite;
@@ -139,7 +140,9 @@ export class Zombie {
     const h = this.info.h * TILE;
     this.body = scene.physics.add.body(feetX - w / 2, feetY - h, w, h);
     this.body.setAllowGravity(true);
-    this.body.setMaxVelocityY(15 * TILE);
+    // Arcade clamps BOTH directions with maxVelocity. 15 tiles/s capped the Runner's jump at 2.81 tiles
+    // (a 3.3-tile jump needs 16.2): it got stuck under every 3-tile block. Cap above any jump speed.
+    this.body.setMaxVelocityY(30 * TILE);
 
     this.sprite = scene.add.sprite(feetX, feetY, this.info.idle, 0).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(8);
     this.sprite.play(this.info.idle);
@@ -236,7 +239,7 @@ export class Zombie {
     b.gravity.y = T.gravity * TILE; // read every step so the slider applies live
     this.iconTimer = Math.max(0, this.iconTimer - dt);
     if (this.state === ZombieState.Dead || this.state === ZombieState.Grab) {
-      if (b.blocked.down) b.setVelocityX(0);
+      if (this.onGround()) b.setVelocityX(0);
       return;
     }
     if (this.kind === ZombieKind.Clicker) this.clicker(dt, player, noise);
@@ -273,11 +276,13 @@ export class Zombie {
       case ZombieState.Chase: anim = moving ? this.info.fast : this.info.idle; break;
       default: anim = moving ? this.info.walk : this.info.idle;
     }
-    if (this.kind === ZombieKind.Runner && !this.body.blocked.down && this.state === ZombieState.Chase) anim = this.info.jump;
+    if (this.kind === ZombieKind.Runner && !this.onGround() && this.state === ZombieState.Chase) anim = this.info.jump;
     if (this.restartAnim) {
       this.sprite.play(anim);
       this.restartAnim = false;
-    } else {
+    } else if (this.state !== ZombieState.Dead && this.state !== ZombieState.Grab) {
+      // play(anim, true) only skips an animation that is still PLAYING: a finished one-shot (death,
+      // grab) would restart every frame. Those are started once by setState() and then left alone.
       this.sprite.play(anim, true);
     }
   }
@@ -365,7 +370,7 @@ export class Zombie {
   private runner(dt: number, player: Player, noise: NoiseSystem): void {
     const b = this.body;
     if (this.state === ZombieState.Stunned) {
-      if (b.blocked.down) b.setVelocityX(b.velocity.x * 0.8);
+      if (this.onGround()) b.setVelocityX(b.velocity.x * 0.8);
       this.timer -= dt;
       if (this.timer <= 0) {
         this.state = ZombieState.Chase;
@@ -402,7 +407,13 @@ export class Zombie {
           this.showIcon('?', 1);
           break;
         }
-        if (!b.blocked.down) break; // keep momentum in the air
+        // In the air: never push into a wall. Pressing diagonally into a block's side makes Arcade
+        // resolve the overlap vertically and push the Runner back down: it jumped every step and never
+        // rose. So it rises straight up beside the wall and moves on once its feet clear the top.
+        if (!this.onGround()) {
+          b.setVelocityX(this.wallAhead() ? 0 : this.dir * T.runnerSpeed * TILE);
+          break;
+        }
         const dx = this.targetX - this.feetX;
         if (Math.abs(dx) <= ARRIVE * TILE) {
           b.setVelocityX(0);
@@ -410,11 +421,10 @@ export class Zombie {
           break;
         }
         this.dir = Math.sign(dx);
-        if (this.wallAhead() || !this.groundAhead()) {
-          b.setVelocity(this.dir * T.runnerSpeed * TILE, -Math.sqrt(2 * T.gravity * TILE * T.runnerJump * TILE));
-        } else {
-          b.setVelocityX(this.dir * T.runnerSpeed * TILE);
-        }
+        const jumpSpeed = Math.sqrt(2 * T.gravity * TILE * T.runnerJump * TILE);
+        if (this.wallAhead()) b.setVelocity(0, -jumpSpeed); // straight up the wall
+        else if (!this.groundAhead()) b.setVelocity(this.dir * T.runnerSpeed * TILE, -jumpSpeed); // across a gap
+        else b.setVelocityX(this.dir * T.runnerSpeed * TILE);
         break;
       }
     }
@@ -547,7 +557,7 @@ export class Zombie {
       b.setVelocityX(0);
       return;
     }
-    if (b.blocked.down && (this.wallAhead() || !this.groundAhead())) {
+    if (this.onGround() && (this.wallAhead() || !this.groundAhead())) {
       this.dir = -this.dir;
       this.timer = pause;
       b.setVelocityX(0);
@@ -565,7 +575,7 @@ export class Zombie {
       return true;
     }
     this.dir = Math.sign(dx);
-    if (b.blocked.down && (this.wallAhead() || !this.groundAhead())) {
+    if (this.onGround() && (this.wallAhead() || !this.groundAhead())) {
       b.setVelocityX(0);
       return true; // as close as it can get without leaving its floor
     }
@@ -587,6 +597,17 @@ export class Zombie {
   private showIcon(text: string, seconds: number): void {
     this.icon.setText(text);
     this.iconTimer = seconds;
+  }
+
+  /**
+   * Standing on something solid. Our own probe instead of Arcade's blocked.down: pressed into a wall
+   * corner (a block on the floor), Arcade's separation leaves blocked.down false while the zombie is
+   * standing still on the floor, so a chasing Runner never jumped and stayed stuck against the block.
+   */
+  private onGround(): boolean {
+    const b = this.body;
+    if (b.velocity.y < 0) return false; // rising: not grounded
+    return this.physics.overlapRect(b.left + 2, b.bottom + 1, b.width - 4, 2, false, true).length > 0;
   }
 
   private wallAhead(): boolean {

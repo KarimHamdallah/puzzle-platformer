@@ -42,11 +42,12 @@ fill(1, GROUND, W - 2, H - 1)
 put(3, 25, 'P')
 put(6, 25, 'x')                 # stash before the tunnel
 put(9, 25, 'B')                 # practice crate (toggle crouch behind it)
-fill(13, 21, 32, 22)            # tunnel roof: interior rows 23..25 = 3 tiles
+fill(13, 21, 34, 22)            # tunnel roof: interior rows 23..25 = 3 tiles (covers the door too)
 put(17, 25, 'B')
-put(23, 25, 'C')                # Clicker at its post in the tunnel, facing left (toward you)
+put(23, 25, 'C')                # Clicker at its post in the tunnel, facing left; carries key 1
 put(28, 25, 'B')
-put(35, 25, 'K')
+put(33, 25, 'D')                # locked door 1 at the tunnel exit
+put(36, 25, 'K')
 
 # ---- B: Runner yard (x 36..86), open sky ---------------------------------------------------------
 # The Runner is faster than your sprint and jumps higher than you: break its line of sight behind a
@@ -57,12 +58,13 @@ fill(48, 25, 48, 25)            # 1-high obstacle
 put(52, 25, 'B')
 fill(55, 23, 57, 25)            # 3-high block: a launch point for a stomp
 put(56, 22, 'x')                # stash on the block
-put(61, 25, 'R')
+put(61, 25, 'R')                # yard Runner; carries key 2
 put(64, 25, 'B')
 fill(68, 24, 69, 25)            # 2-high obstacle
 put(74, 25, 'B')
 put(79, 25, 'x')
-fill(84, 23, 86, 25)            # 3-high exit wall
+fill(84, 14, 84, 22)            # 12-tile wall at the end of the yard (no jumping over it)...
+put(84, 25, 'D')                # ...with locked door 2 at its foot
 put(89, 25, 'K')
 
 # ---- C: three-floor building (x 90..130), every floor 3 tiles high ------------------------
@@ -87,10 +89,11 @@ put(118, 21, 'B')
 fill(92, 21, 94, 21)
 put(93, 20, 'x')                # stash on the step
 fill(95, 18, 129, 18)           # floor 3 slab: floor 2 interior rows 19..21
-fill(95, 14, 129, 14)           # building roof: floor 3 interior rows 15..17
+fill(95, 14, 130, 14)           # building roof: floor 3 interior rows 15..17 (covers the door too)
 put(106, 17, 'B')
-put(112, 17, 'C')               # floor-3 Clicker at its post, facing left
+put(112, 17, 'C')               # floor-3 Clicker at its post, facing left; carries key 3
 put(121, 17, 'B')
+put(130, 17, 'D')               # locked door 3: floor 3 -> rooftops (the street has no way up)
 
 # ---- D: rooftops (x 130..199) -------------------------------------------------------------
 # Open rooftops with a Runner and crates, then the Screamer inside a low shack guarding the exit:
@@ -111,7 +114,8 @@ put(180, 17, 'x')
 put(182, 17, 'B')               # crate just outside the shack
 fill(184, 13, 197, 14)          # shack roof: interior rows 15..17
 put(187, 17, 'B')               # crate inside the shack
-put(192, 17, 'S')               # Screamer, facing left (toward the entrance)
+put(192, 17, 'S')               # Screamer, facing left (toward the entrance); carries key 4
+put(196, 17, 'D')               # locked door 4 in front of the exit
 put(197, 17, 'E')               # exit at the back of the shack
 # street below: falling here means walking back through the building (no softlock)
 put(145, 25, 'x')

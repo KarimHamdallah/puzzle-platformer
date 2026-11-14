@@ -16,11 +16,11 @@ import type { Player } from './Player';
  *   +-------------------------------+
  */
 class CameraTuning {
-  screenX = 0.5; // where the target sits on screen (0 = left, 1 = right)
+  screenX = 0.34; // where the target sits on screen (0 = left, 1 = right): left third = more view ahead
   screenY = 0.5; // (0 = top, 1 = bottom)
-  deadZoneWidth = 0.57;
+  deadZoneWidth = 0.37;
   deadZoneHeight = 0.78; // must stay > ~0.4 so a full jump from rest never moves the camera
-  softZoneWidth = 0.6;
+  softZoneWidth = 0.5;
   softZoneHeight = 0.75; // smaller than deadZoneHeight -> treated as equal: no vertical soft zone
   dampingX = 0.25; // s to catch up inside the soft zone (0 = instant)
   dampingY = 0.35;

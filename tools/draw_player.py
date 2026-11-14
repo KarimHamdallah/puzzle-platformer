@@ -47,6 +47,12 @@ PALETTE = {
     'Q': (74, 116, 70),    # bottle glass
     'q': (150, 186, 128),  # bottle glass highlight
     'N': (40, 62, 40),     # bottle neck / dark glass
+    'k': (214, 170, 72),   # key / padlock brass
+    'g': (150, 110, 44),   # brass shade
+    'D': (78, 74, 66),     # door steel
+    'd': (54, 51, 46),     # door steel shade
+    'U': (110, 72, 50),    # rust
+    'V': (122, 118, 106),  # door highlight / rivet
 }
 
 
@@ -321,6 +327,42 @@ ANIMATIONS = {
 }
 
 
+def draw_key_sprite():
+    """Brass key dropped by a guardian: ring bow + shaft + two teeth, 15x8 px, outlined."""
+    c = Canvas()
+    c.rect(1, 2, 4, 5, 'k')                     # bow (ring)
+    c.rect(2, 3, 3, 4, None)                    # hole
+    c.put(1, 2, 'g'); c.put(1, 5, 'g')
+    c.row(3, 5, 13, 'k')                        # shaft
+    c.row(4, 5, 13, 'g')
+    c.rect(10, 5, 10, 6, 'k')                   # teeth
+    c.rect(12, 5, 12, 6, 'k')
+    c.outline()
+    return c.image().crop((0, 1, 15, 9))
+
+
+def draw_door_sprite():
+    """Locked steel door, 1 tile x 3 tiles at 2x = 32x96 px: riveted plates, rust, brass padlock."""
+    c = Canvas()
+    c.rect(1, 0, 30, 95, 'D')
+    c.rect(1, 0, 2, 95, 'd')                    # frame shade
+    c.rect(29, 0, 30, 95, 'd')
+    for y in (31, 63):                          # plate seams
+        c.row(y, 1, 30, 'd')
+    for y in (4, 27, 35, 59, 67, 91):           # rivets
+        c.put(5, y, 'V')
+        c.put(26, y, 'V')
+    for x, y in ((8, 20), (9, 21), (20, 44), (21, 45), (22, 45), (12, 80), (13, 81), (24, 74)):
+        c.put(x, y, 'U')                        # rust spots
+    c.rect(12, 44, 19, 52, 'k')                 # padlock body
+    c.rect(12, 50, 19, 52, 'g')
+    c.rect(13, 39, 18, 43, 'k')                 # shackle
+    c.rect(15, 41, 16, 43, None)
+    c.put(15, 47, 'd'); c.put(16, 47, 'd'); c.put(15, 48, 'd')   # keyhole
+    c.outline()
+    return c.image().crop((0, 0, 32, 96))
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -352,6 +394,8 @@ def main():
         sheets[name] = sheet
     draw_bottle_sprite().save(os.path.join(out_dir, 'bottle.png'))
     draw_stash_sprite().save(os.path.join(out_dir, 'stash.png'))
+    draw_key_sprite().save(os.path.join(out_dir, 'key.png'))
+    draw_door_sprite().save(os.path.join(out_dir, 'door.png'))
 
     if preview_dir:  # contact sheet: every animation on its own row, 3x zoom, cropped to the body
         os.makedirs(preview_dir, exist_ok=True)
