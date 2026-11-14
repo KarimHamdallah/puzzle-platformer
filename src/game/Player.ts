@@ -105,6 +105,8 @@ export class Player {
   crouched = false;
   crouchWanted = false; // crouch is a TOGGLE: one press of Down / S / C
   hidden = false; // crouched behind cover: sighted enemies cannot see him
+  stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
+  landCount = 0; // loud landings so far
   dead = false;
   facing = 1;
   /** Cover areas (crates) and the infected, for hiding and melee; the scene fills these. */
@@ -453,6 +455,15 @@ export class Player {
     if (this.crouched) return; // sneaking is silent
     const radius = speed > T.walkSpeed * TILE * 1.1 ? T.sprintNoise : T.walkNoise;
     this.noise.emit(this.feetX, this.feetY, radius, NoiseKind.Footstep);
+    this.stepCount++;
+  }
+
+  /** How loud moving is right now, for the HUD: 0 silent (still, crouched, airborne), 1 walking, 2 running. */
+  get noiseLevel(): number {
+    if (!this.grounded || this.crouched || this.dead) return 0;
+    const speed = Math.abs(this.body.velocity.x);
+    if (speed > T.walkSpeed * TILE * 1.1) return 2;
+    return speed > 10 ? 1 : 0;
   }
 
   private behindCover(): boolean {
@@ -567,7 +578,10 @@ export class Player {
     const impact = Phaser.Math.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
     this.pulseScale(1 + T.squash * impact, 1 - T.squash * impact, 130);
     if (impact > 0.2) this.landTimer = LAND_ANIM_TIME; // small hops don't need the crouch pose
-    if (impact > 0.45) this.noise.emit(this.feetX, this.feetY, T.landNoise, NoiseKind.Landing); // hard landings are loud
+    if (impact > 0.45) { // hard landings are loud
+      this.noise.emit(this.feetX, this.feetY, T.landNoise, NoiseKind.Landing);
+      this.landCount++;
+    }
     if (this.debugView) this.debugView.onLand();
   }
 

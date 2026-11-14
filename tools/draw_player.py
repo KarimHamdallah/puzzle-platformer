@@ -552,6 +552,22 @@ def draw_fire_frames(frames=8, w=32, h=48):
     return sheet
 
 
+def draw_boot_sprite():
+    """HUD noise meter: a work boot seen from the side, toe to the right, 16x13 px."""
+    c = Canvas()
+    c.rect(2, 1, 7, 8, 'O')                     # shaft
+    c.rect(2, 1, 2, 8, 'o')
+    c.row(1, 2, 7, 'L')                         # collar
+    for y in (3, 5, 7):                         # laces
+        c.put(6, y, 'Y')
+    c.rect(2, 8, 13, 10, 'O')                   # foot
+    c.rect(11, 7, 13, 8, 'O'); c.put(14, 9, 'O'); c.put(14, 10, 'O')   # rounded toe
+    c.row(11, 2, 14, 'o')                       # sole
+    c.put(8, 11, 'K'); c.put(11, 11, 'K')       # tread
+    c.outline()
+    return c.image().crop((0, 0, 16, 13))
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -591,6 +607,7 @@ def main():
     draw_molotov_sprite().save(os.path.join(out_dir, 'molotov.png'))
     draw_rag_sprite().save(os.path.join(out_dir, 'rag.png'))
     draw_fire_frames().save(os.path.join(out_dir, 'fire.png'))
+    draw_boot_sprite().save(os.path.join(out_dir, 'boot.png'))
     if preview_dir:
         os.makedirs(preview_dir, exist_ok=True)
         corpse = draw_corpse_sprite()

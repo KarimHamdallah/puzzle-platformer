@@ -9,7 +9,7 @@ import { Letter } from './Letter';
 import { KeyColor, LEVELS, LevelProgress, type LevelData } from './Levels';
 import { KEY_TINTS, Locks } from './Locks';
 import { MolotovQuest } from './Molotov';
-import { NoiseKind, NoiseSystem } from './Noise';
+import { NoiseKind, NoiseMeter, NoiseSystem } from './Noise';
 import { Player } from './Player';
 import { Throwables } from './Throwing';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
@@ -101,6 +101,7 @@ export class LevelScene extends Phaser.Scene {
   private groupZombies: Zombie[][] = []; // per LEVEL.keyGroups entry: the zombies that carry its key
   private hudColourKeys: Phaser.GameObjects.Image[] = [];
   private hudMolotov: Phaser.GameObjects.Image | null = null;
+  private noiseMeter!: NoiseMeter;
   private summoned: Zombie[] = []; // Runners called in by Screamers
   private world!: Phaser.Physics.Arcade.World;
   private hudCount!: Phaser.GameObjects.Text;
@@ -232,6 +233,7 @@ export class LevelScene extends Phaser.Scene {
       this.hudColourKeys[c].setAlpha(this.progress.keyHeld[c] ? 1 : 0.22).setVisible(!this.progress.keysUsed);
     }
     if (this.hudMolotov) this.hudMolotov.setVisible(this.throwables.molotovs > 0);
+    this.noiseMeter.update(deltaMs, this.player.noiseLevel, this.player.stepCount, this.player.landCount);
     if (this.zombieDebug) this.zombieDebug.draw(this.player);
   }
 
@@ -435,6 +437,7 @@ export class LevelScene extends Phaser.Scene {
 
   private createHud(): void {
     this.add.image(48, 44, 'bottle').setScale(ART_SCALE * 2).setScrollFactor(0).setDepth(50);
+    this.noiseMeter = new NoiseMeter(this, 196, 44); // right of the bottle counter
     this.hudCount = this.add.text(80, 44, '', {
       fontFamily: 'Georgia, serif', fontSize: '40px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 6,
     }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(50);

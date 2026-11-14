@@ -54,6 +54,7 @@ const IMAGES: [string, string][] = [
   ['car_open', 'assets/player/car_open.png'],
   ['molotov', 'assets/player/molotov.png'],
   ['rag', 'assets/player/rag.png'],
+  ['boot', 'assets/player/boot.png'],
   ['bg_sky', 'assets/craftpix/bg/sky.png'],
   ['bg_far', 'assets/craftpix/bg/far.png'],
   ['bg_mid', 'assets/craftpix/bg/mid.png'],
