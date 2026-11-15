@@ -794,6 +794,43 @@ def draw_scaffold_block_sprite():
     return c.image().crop((0, 0, 32, 32))
 
 
+def draw_helicopter_sprite():
+    """Army helicopter, side view, nose to the RIGHT, 96x44 px: tail boom + tail rotor on the left, an
+    open side door with the sniper's helmet and barrel, a door gun under the nose, skids. The main
+    rotor is drawn by the game (it spins)."""
+    c = Canvas()
+    # tail boom and fin
+    c.rect(4, 58, 40, 62, ';'); c.row(62, 4, 40, ':')
+    c.rect(2, 48, 8, 60, ';'); c.rect(2, 48, 3, 60, ':')
+    c.rect(0, 50, 1, 56, '['); c.rect(9, 50, 10, 56, '[')       # tail rotor (blur)
+    # cabin
+    for i, y in enumerate(range(50, 74)):
+        x0 = 36 - min(i, 4)
+        x1 = 80 + min(i, 8) - max(0, i - 16)
+        c.row(y, x0, x1, ';')
+    c.row(73, 34, 82, ':'); c.rect(32, 66, 88, 73, ':')
+    c.rect(36, 49, 74, 51, ':')                                  # roof / engine
+    c.rect(46, 44, 60, 49, ';'); c.rect(52, 40, 54, 44, '[')     # engine + rotor mast
+    # cockpit glass
+    for i, y in enumerate(range(54, 66)):
+        c.row(y, 74 + max(0, 4 - i), 84 + min(i, 6) - max(0, i - 8), '6')
+    c.row(54, 74, 84, 'K')
+    # open side door: dark inside, the sniper's helmet and long barrel
+    c.rect(48, 54, 64, 68, 'K')
+    c.rect(52, 56, 58, 59, '('); c.row(60, 52, 58, ')')          # helmet
+    c.rect(53, 60, 57, 63, 'S')                                  # face
+    c.rect(56, 62, 70, 63, '[')                                  # rifle barrel
+    # door gun under the nose
+    c.rect(78, 74, 84, 77, '['); c.rect(84, 75, 92, 76, '[')
+    # skids
+    c.stroke((40, 74), (40, 80), 1, '['); c.stroke((76, 74), (76, 80), 1, '[')
+    c.row(81, 34, 86, '['); c.put(87, 80, '[')
+    # star / stencil
+    c.rect(64, 66, 68, 69, ',')
+    c.outline()
+    return c.image().crop((0, 38, 96, 84))
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -843,6 +880,12 @@ def main():
     draw_newspaper_sprite().save(os.path.join(out_dir, 'newspaper.png'))
     draw_scaffold_sprite().save(os.path.join(out_dir, 'scaffold.png'))
     draw_scaffold_block_sprite().save(os.path.join(out_dir, 'scaffold_block.png'))
+    draw_helicopter_sprite().save(os.path.join(out_dir, 'helicopter.png'))
+    if preview_dir:
+        heli = draw_helicopter_sprite()
+        bg = Image.new('RGBA', heli.size, (150, 160, 170, 255))
+        bg.alpha_composite(heli)
+        bg.resize((heli.width * 6, heli.height * 6), Image.NEAREST).save(os.path.join(preview_dir, 'heli_preview.png'))
     draw_big_crate_damaged(False).save(os.path.join(out_dir, 'big_crate_cracked.png'))
     draw_big_crate_damaged(True).save(os.path.join(out_dir, 'big_crate_broken.png'))
     draw_concrete_sprite().save(os.path.join(out_dir, 'concrete.png'))

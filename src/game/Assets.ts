@@ -65,6 +65,7 @@ const IMAGES: [string, string][] = [
   ['newspaper', 'assets/player/newspaper.png'],
   ['scaffold', 'assets/player/scaffold.png'],
   ['scaffold_block', 'assets/player/scaffold_block.png'],
+  ['helicopter', 'assets/player/helicopter.png'],
   ['big_crate_cracked', 'assets/player/big_crate_cracked.png'],
   ['big_crate_broken', 'assets/player/big_crate_broken.png'],
   ['concrete', 'assets/player/concrete.png'],

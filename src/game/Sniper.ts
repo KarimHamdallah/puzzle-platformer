@@ -46,6 +46,7 @@ export interface SniperDef {
   zones: SniperZone[];
   mad?: boolean; // rifle: random reload (MAD_RELOAD_MIN..MAX, listen for the bolt), sometimes a double shot
   blind?: [number, number, number, number][]; // tile rects x0, y0, x1, y1 he can't see (right under his nest)
+  mounted?: boolean; // on a helicopter: no nest sprite; the owner moves him (setMuzzle / setZone / active)
 }
 
 enum State {
@@ -71,6 +72,8 @@ const GUNNER_SWEEP = 5; // tiles/s
 const GUNNER_BURST = 0.09; // s between machine-gun shots
 const GUNNER_PLAYER_TIME = 0.9; // s he keeps firing into you (pinned, you can't move) before you fall
 const GUNNER_KILL_TIME = 2.7; // s of fire to cut down a zombie (the player's window)
+const MOUNTED_KILL_TIME = 1.0; // s: the helicopter's door gun, much closer, cuts an infected down fast
+const MOUNTED_SPOT_TIME = 0.6; // s you can be out of cover under the helicopter before its gun opens up (time to throw)
 const HEAD_INSET = 0.1; // tiles below the top of the player's body: where soldiers aim
 const RAY_STEP = 6; // px
 const LASER_COLOUR = 0xff2a3a;
@@ -86,8 +89,9 @@ export class Sniper {
   private readonly onCoverHit: (x: number, y: number) => void; // a bullet hit cover (crates break)
   private doubleShot = false; // the mad sniper's second shot is coming
   private readonly gfx: Phaser.GameObjects.Graphics;
-  private readonly muzzleX: number;
-  private readonly muzzleY: number;
+  private muzzleX: number;
+  private muzzleY: number;
+  active = true; // mounted: off until the helicopter arrives, off once you are out of reach
   private state = State.Idle;
   private timer = 0;
   private laserX: number; // where he is pointing (px)
@@ -95,6 +99,7 @@ export class Sniper {
   private goalX: number; // rifle idle: next point to wander to / gunner: sweep end
   private goalY: number;
   private sweepDir = -1;
+  private spotted = 0; // mounted gunner: s you have been exposed in his ground
   private target: Zombie | null = null; // gunner: the infected he is cutting down (null = the player)
   private burst = 0;
   private flash = 0; // s left of the muzzle / impact flash
@@ -105,7 +110,8 @@ export class Sniper {
   constructor(scene: Phaser.Scene, def: SniperDef, player: Player, zombies: Zombie[], covers: Phaser.Geom.Rectangle[],
     solidAt: (x: number, y: number) => boolean, onCoverHit: (x: number, y: number) => void) {
     this.scene = scene;
-    this.def = def;
+    // A copy: a mounted gunner's zone moves every frame, the level's data must not.
+    this.def = { ...def, zones: def.zones.map(z => ({ ...z })) };
     this.player = player;
     this.zombies = zombies;
     this.covers = covers;
@@ -114,7 +120,7 @@ export class Sniper {
     const feetX = (def.tile[0] + 0.5) * TILE;
     const feetY = (def.tile[1] + 1) * TILE;
     const gunner = def.kind === SniperKind.Gunner;
-    scene.add.image(feetX, feetY, gunner ? 'gunner_nest' : 'sniper_nest').setOrigin(0.5, 1).setScale(ART_SCALE).setFlipX(true).setDepth(6);
+    if (!def.mounted) scene.add.image(feetX, feetY, gunner ? 'gunner_nest' : 'sniper_nest').setOrigin(0.5, 1).setScale(ART_SCALE).setFlipX(true).setDepth(6);
     this.muzzleX = feetX + (gunner ? -54 : -60); // barrel tip of the (flipped) nest sprite
     this.muzzleY = feetY - 54;
     const z = def.zones[0];
@@ -125,9 +131,49 @@ export class Sniper {
     this.gfx = scene.add.graphics().setDepth(30);
   }
 
+  /** Mounted: where the barrel is now (px). */
+  setMuzzle(x: number, y: number): void {
+    this.muzzleX = x;
+    this.muzzleY = y;
+  }
+
+  /** Rifle: as if he had just fired (the laser follows, the shot waits `seconds`). */
+  holdFire(seconds: number): void {
+    this.state = State.Reload;
+    this.timer = seconds;
+  }
+
+  /** Gunner: cutting down an infected right now. */
+  get busyWithInfected(): boolean {
+    return this.state === State.Firing && this.target !== null;
+  }
+
+  /** Mounted: the laser dot starts here (px), not where the level's zone would put it. */
+  setLaser(x: number, y: number): void {
+    this.laserX = x;
+    this.laserY = y;
+    this.goalX = x;
+    this.goalY = y;
+  }
+
+  /** Mounted gunner: the ground he covers now (tiles). */
+  setZone(x0: number, y0: number, x1: number, y1: number): void {
+    const z = this.def.zones[0];
+    z.x0 = x0;
+    z.y0 = y0;
+    z.x1 = x1;
+    z.y1 = y1;
+  }
+
   /** Gameplay, at the physics rate. */
   fixedUpdate(dt: number): void {
     this.flash = Math.max(0, this.flash - dt);
+    if (!this.active) { // switched off: no aiming, no firing, the laser goes dark
+      if (this.state !== State.Idle) this.state = State.Reload;
+      this.timer = Math.max(this.timer, 0.5);
+      if (this.player.pinned && !this.player.dead) this.player.pinned = false;
+      return;
+    }
     if (this.def.kind === SniperKind.Rifle) this.rifle(dt);
     else this.gunner(dt);
   }
@@ -175,6 +221,14 @@ export class Sniper {
   private fireRifle(): void {
     const p = this.player;
     const hit = this.ray(this.muzzleX, this.muzzleY, p.body.center.x, this.headY());
+    if (!hit.blocked && p.hidden && !p.invisible) { // crouched behind cover, seen from above: the round takes the cover
+      const c = this.coverOver(p.body.center.x, p.body.bottom - 1);
+      if (c) {
+        hit.x = Phaser.Math.Clamp(p.body.center.x, c.x, c.right);
+        hit.y = c.y + 4;
+        hit.blocked = true;
+      }
+    }
     this.shotEffects(hit.x, hit.y, 0.008, 180);
     rifleShot(this.scene);
     if (hit.blocked && this.inCover(hit.x, hit.y)) this.onCoverHit(hit.x, hit.y);
@@ -228,7 +282,8 @@ export class Sniper {
       const t = this.target;
       // A zombie can stumble out of his ground; you can't: once he is on you, you are pinned until you fall.
       const still = t ? t.alive && this.inZone(t.body.center.x, t.body.center.y) && this.exposed(t.body.center.x, t.body.center.y)
-        : !p.dead;
+        : !p.dead && (!this.def.mounted || this.exposed(p.body.center.x, this.headY())); // the helicopter's: smoke breaks his aim
+      if (!still && !t && !p.dead) p.pinned = false;
       if (!still) {
         this.state = State.Idle;
         this.target = null;
@@ -248,7 +303,7 @@ export class Sniper {
         t.suppress(); // pinned down: it can't move, hear or grab while he shoots it
         const took = (this.hits.get(t) ?? 0) + dt;
         this.hits.set(t, took);
-        if (took >= GUNNER_KILL_TIME) {
+        if (took >= (this.def.mounted ? MOUNTED_KILL_TIME : GUNNER_KILL_TIME)) {
           t.shot();
           this.state = State.Idle;
           this.target = null;
@@ -277,7 +332,13 @@ export class Sniper {
         return;
       }
     }
-    if (!p.dead && !p.invisible && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, this.headY())) this.startFiring(null);
+    // you: only out of hiding (crouched behind cover he can't tell you from the crates, even from above)
+    const seen = !p.dead && !p.invisible && !p.hidden && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, this.headY());
+    this.spotted = seen ? this.spotted + dt : 0;
+    if (seen && (!this.def.mounted || this.spotted >= MOUNTED_SPOT_TIME)) {
+      this.spotted = 0;
+      this.startFiring(null);
+    }
   }
 
   private startFiring(target: Zombie | null): void {
@@ -357,6 +418,16 @@ export class Sniper {
     return { x: x1, y: y1, blocked: false };
   }
 
+  /** The cover rectangle a crouched player at (x, feetY) is hiding behind, if any. */
+  private coverOver(x: number, feetY: number): Phaser.Geom.Rectangle | null {
+    const halfW = this.player.body.width * 0.5;
+    for (let i = 0; i < this.covers.length; i++) {
+      const c = this.covers[i];
+      if (x + halfW > c.x && x - halfW < c.right && feetY > c.y && feetY - TILE < c.bottom) return c;
+    }
+    return null;
+  }
+
   private inCover(x: number, y: number): boolean {
     for (let i = 0; i < this.covers.length; i++) if (this.covers[i].contains(x, y)) return true;
     return false;
@@ -382,6 +453,7 @@ export class Sniper {
   update(timeMs: number): void {
     const g = this.gfx;
     g.clear();
+    if (!this.active && this.flash <= 0) return;
     if (this.flash > 0) { // muzzle and impact flashes
       g.fillStyle(0xfff2c0, 0.95).fillCircle(this.muzzleX, this.muzzleY, 16);
       g.fillStyle(0xffffff, 0.9).fillCircle(this.impactX, this.impactY, 12);

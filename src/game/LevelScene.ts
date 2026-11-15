@@ -6,6 +6,7 @@ import { Blackout } from './Blackout';
 import { CameraRig } from './CameraRig';
 import { ART_SCALE, TILE } from './constants';
 import { Dialogue } from './Dialogue';
+import { Helicopter } from './Helicopter';
 import { FATHER_LETTER, Letter, SOLDIER_NEWSPAPER } from './Letter';
 import { KeyColor, LEVELS, LevelProgress, type LevelData } from './Levels';
 import { KEY_TINTS, Locks } from './Locks';
@@ -35,6 +36,7 @@ const SUMMON_MAX = 4; // summoned Runners alive at once
 const LISTEN_UNLOCK_KEY = 'upgrade:listen'; // localStorage: Listen Mode earned (Hard finished)
 const SUMMON_MIN_DISTANCE = 6; // tiles: when nothing off-screen is on your level, they appear at least this far
 const STOMP_NOISE = 4; // tiles
+const HUD_UNSELECTED_ALPHA = 0.35; // HUD: the throwable the next throw won't use
 const CHECKPOINT_OFF = 0x8a8a7a;
 const CHECKPOINT_ON = 0xffa640;
 
@@ -142,8 +144,10 @@ export class LevelScene extends Phaser.Scene {
   private blackout!: Blackout;
   private snipers: Sniper[] = [];
   private smokeQuest: SmokeQuest | null = null;
+  private heli: Helicopter | null = null;
   private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
   private hudSmoke: Phaser.GameObjects.Image | null = null;
+  private hudBottle!: Phaser.GameObjects.Image;
   private hudSmokeCount: Phaser.GameObjects.Text | null = null;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private grassLayer!: Phaser.Tilemaps.TilemapLayer;
@@ -202,6 +206,7 @@ export class LevelScene extends Phaser.Scene {
     this.letter = null;
     this.snipers = [];
     this.smokeQuest = null;
+    this.heli = null;
     this.crates = [];
     this.hudSmoke = null;
     this.hudSmokeCount = null;
@@ -238,10 +243,12 @@ export class LevelScene extends Phaser.Scene {
     const molotovLevel = MAP.some(row => row.includes('V'));
     const smokeLevel = MAP.some(row => row.includes('Y'));
     if (molotovLevel || smokeLevel || LEVEL.intro.length > 0) this.dialogue = new Dialogue(this, this.controls);
+    if (LEVEL.startSmokes > 0 && !this.progress.introSeen) this.progress.smokes = LEVEL.startSmokes; // first start only
     if (smokeLevel && this.dialogue) {
       this.smokeQuest = new SmokeQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.covers,
         (text, ms) => this.banner(text, ms));
       this.smokeQuest.setGunnerSeenAt(LEVEL.gunnerSeenAt);
+      this.smokeQuest.quietLoot = LEVEL.heli !== null;
     }
     if (molotovLevel && this.dialogue) { // the Molotov level
       this.quest = new MolotovQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.locks,
@@ -257,6 +264,11 @@ export class LevelScene extends Phaser.Scene {
 
     this.cameraRig = new CameraRig(this, this.player, worldW, worldH);
     if (this.progress.sawGunner) this.showRevealed(false); // seen before a death: already there
+    if (LEVEL.heli) {
+      this.heli = new Helicopter(this, LEVEL.heli, this.player, this.zombies, this.covers,
+        (x, y) => isStone(Math.floor(x / TILE), Math.floor(y / TILE)), (x, y) => this.crateHit(x, y));
+      if (this.progress.introSeen) this.heli.start(); // after a death: straight back to the chase
+    }
     for (let i = 0; i < LEVEL.snipers.length; i++) {
       this.snipers.push(new Sniper(this, LEVEL.snipers[i], this.player, this.zombies, this.covers,
         (x, y) => isStone(Math.floor(x / TILE), Math.floor(y / TILE)), (x, y) => this.crateHit(x, y)));
@@ -273,7 +285,10 @@ export class LevelScene extends Phaser.Scene {
     if (this.dialogue && LEVEL.intro.length > 0 && !this.progress.introSeen) { // the level's opening thoughts
       this.progress.introSeen = true;
       const dialogue = this.dialogue;
-      this.time.delayedCall(450, () => dialogue.show(LEVEL.intro, () => { if (LEVEL.introBanner) this.banner(LEVEL.introBanner, 3200); }));
+      this.time.delayedCall(450, () => dialogue.show(LEVEL.intro, () => {
+        if (LEVEL.introBanner) this.banner(LEVEL.introBanner, 3200);
+        if (this.heli) this.heli.start(); // the chase begins when he has understood
+      }));
     }
     if (DEBUG_ENABLED) this.zombieDebug = new ZombieDebug(this, this.zombies);
 
@@ -307,6 +322,7 @@ export class LevelScene extends Phaser.Scene {
       return;
     }
     if (this.controls.pressed(Action.Reset)) this.restartLevel();
+    if (this.smokeQuest && this.controls.pressed(Action.Swap)) this.throwables.preferSmoke = !this.throwables.preferSmoke;
     if (LEVEL.cheats) this.cheats();
 
     this.player.update(deltaMs);
@@ -316,6 +332,7 @@ export class LevelScene extends Phaser.Scene {
     this.cameraRig.update(deltaMs);
     this.blackout.update(deltaMs);
     for (let i = 0; i < this.snipers.length; i++) this.snipers[i].update(time);
+    if (this.heli) this.heli.update(time);
 
     const scrollX = this.cameras.main.scrollX;
     for (let i = 0; i < this.parallax.length; i++) this.parallax[i].tilePositionX = scrollX * PARALLAX[i][1];
@@ -329,6 +346,13 @@ export class LevelScene extends Phaser.Scene {
       const n = this.throwables.smokes;
       this.hudSmoke.setVisible(n > 0);
       this.hudSmokeCount.setVisible(n > 0).setText('x ' + n);
+      // holding both: the one the next throw uses is lit, the other dim
+      const both = n > 0 && this.throwables.count > 0;
+      const smokeNext = this.throwables.smokeNext;
+      this.hudSmoke.setAlpha(both && !smokeNext ? HUD_UNSELECTED_ALPHA : 1);
+      this.hudSmokeCount.setAlpha(both && !smokeNext ? HUD_UNSELECTED_ALPHA : 1);
+      this.hudBottle.setAlpha(both && smokeNext ? HUD_UNSELECTED_ALPHA : 1);
+      this.hudCount.setAlpha(both && smokeNext ? HUD_UNSELECTED_ALPHA : 1);
     }
     this.noiseMeter.update(deltaMs, this.player.noiseLevel, this.player.stepCount, this.player.landCount, this.noise.masked);
     if (this.zombieDebug) this.zombieDebug.draw(this.player);
@@ -351,6 +375,7 @@ export class LevelScene extends Phaser.Scene {
       }
     }
     for (let i = 0; i < this.snipers.length; i++) this.snipers[i].fixedUpdate(dt);
+    if (this.heli) this.heli.fixedUpdate(dt, this.time.now);
     this.dropGroupKeys();
     this.locks.fixedUpdate(dt, this.player.body);
     if (this.quest) this.quest.fixedUpdate();
@@ -467,6 +492,7 @@ export class LevelScene extends Phaser.Scene {
       if (p.feetX < c.x - TILE * 0.5 || Math.abs(p.feetY - c.y) > TILE * 2) continue;
       this.checkpoint = i;
       this.bottlesAtCheckpoint = this.throwables.count;
+      if (LEVEL.heli) this.progress.smokesAtCheckpoint = this.throwables.smokes;
       this.drawFlag(c, true);
       this.banner('CHECKPOINT', 1200);
     }
@@ -482,6 +508,12 @@ export class LevelScene extends Phaser.Scene {
   private restartLevel(): void {
     if (this.restarting) return;
     this.restarting = true;
+    if (LEVEL.heli) { // the escape is one run: crates and smoke come back as they were at the checkpoint
+      const p = this.progress;
+      p.crateHp = [];
+      p.cacheLooted = false;
+      p.smokes = p.smokesAtCheckpoint >= 0 ? p.smokesAtCheckpoint : LEVEL.startSmokes;
+    }
     const data: RestartData = {
       level: this.levelIndex, checkpoint: this.checkpoint, bottles: this.bottlesAtCheckpoint, progress: this.progress,
     };
@@ -563,7 +595,7 @@ export class LevelScene extends Phaser.Scene {
   }
 
   private createHud(): void {
-    this.add.image(48, 44, 'bottle').setScale(ART_SCALE * 2).setScrollFactor(0).setDepth(50);
+    this.hudBottle = this.add.image(48, 44, 'bottle').setScale(ART_SCALE * 2).setScrollFactor(0).setDepth(50);
     this.noiseMeter = new NoiseMeter(this, 196, 44); // right of the bottle counter
     this.hudCount = this.add.text(80, 44, '', {
       fontFamily: 'Georgia, serif', fontSize: '40px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 6,
@@ -595,7 +627,8 @@ export class LevelScene extends Phaser.Scene {
     }
     this.add.text(24, this.scale.height - 20,
       'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Read / look ↑'
-      + (this.player.canListen ? '   Listen Q (hold)' : '') + '   Checkpoint R   Levels Esc'
+      + (this.player.canListen ? '   Listen Q (hold)' : '') + (LEVEL.heli ? '   Bottle / smoke Tab' : '')
+      + '   Checkpoint R   Levels Esc'
       + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles' + (this.smokeQuest ? ' / smoke' : '') + ' + invisible + every door open' : ''), {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
@@ -725,10 +758,14 @@ export class LevelScene extends Phaser.Scene {
           case 'S':
             if (!this.keyAlreadyDropped(x, y)) this.zombies.push(new Zombie(this, ZombieKind.Screamer, feetX, feetY, -1, false));
             break;
-          case 'H': // feeding horde (burned before a death: stays burned)
+          case 'H': // feeding Clicker: the horde (burned before a death: stays burned), or one alone at a corpse
             if (this.quest && !this.progress.hordeBurned) {
               const z = new Zombie(this, ZombieKind.Clicker, feetX, feetY, (x * 7) % 3 === 0 ? 1 : -1, false);
               this.quest.addHorde(z);
+              this.zombies.push(z);
+            } else if (!this.quest) { // M2 Hard: eating, it hears you only up close (a bottle still carries)
+              const z = new Zombie(this, ZombieKind.Clicker, feetX, feetY, -1, false);
+              z.feeding = true;
               this.zombies.push(z);
             }
             break;

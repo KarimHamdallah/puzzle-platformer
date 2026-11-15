@@ -74,7 +74,8 @@ export class Throwables {
   stashOverride = 0; // bottles per stash for this level (0 = THROW.stashSize)
   molotovs = 0;
   onMolotov: ((x: number, y: number) => void) | null = null;
-  smokes = 0; // M2 Medium: thrown after any Molotov, before bottles
+  smokes = 0; // M2 Medium: thrown after any Molotov
+  preferSmoke = true; // holding both: the next throw is a smoke grenade (false: a bottle). Tab switches
   onSmoke: ((x: number, y: number) => void) | null = null;
   /** The infected, so bottles (and the aim preview) can hit them; the scene fills this. */
   zombies: Zombie[] = [];
@@ -137,13 +138,18 @@ export class Throwables {
     this.pickups.push({ x: feetX, y: feetY, sprite: sprite, glow: glow });
   }
 
+  /** The next throw is a smoke grenade (no Molotov in hand). */
+  get smokeNext(): boolean {
+    return this.smokes > 0 && (this.preferSmoke || this.count === 0);
+  }
+
   get canThrow(): boolean {
     return this.count > 0 || this.molotovs > 0 || this.smokes > 0;
   }
 
   throwBottle(x: number, y: number, v: Vec): void {
     const molotov = this.molotovs > 0;
-    const smoke = !molotov && this.smokes > 0;
+    const smoke = !molotov && this.smokeNext;
     if (molotov) this.molotovs--;
     else if (smoke) this.smokes--;
     else if (this.count > 0) this.count--;
@@ -213,7 +219,7 @@ export class Throwables {
     const g = this.aimGfx;
     g.clear();
     const molotov = this.molotovs > 0;
-    const smoke = !molotov && this.smokes > 0;
+    const smoke = !molotov && this.smokeNext;
     g.fillStyle(molotov ? 0xff9a3c : smoke ? 0xb8b6ae : 0xffffff, 0.9);
     for (let i = 0; i < this.path.length; i += 3) g.fillCircle(this.path[i].x, this.path[i].y, 3);
     const end = this.path[this.path.length - 1];

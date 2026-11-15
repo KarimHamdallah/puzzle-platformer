@@ -14,6 +14,7 @@ export enum Action {
   Reset,
   Back, // leave the level for the level select
   Listen, // hold: Listen Mode (Hard level's upgrade)
+  Swap, // smoke levels: switch the next throw between bottle and smoke grenade
   Num1, // number-row shortcuts: the cheat toggle (Hard) / dev shortcuts (Medium, debug builds)
   Num2,
   Count, // number of actions, keep last
@@ -44,6 +45,7 @@ const KEY_BINDINGS = new Map<string, Action>([
   ['KeyR', Action.Reset],
   ['Escape', Action.Back],
   ['KeyQ', Action.Listen],
+  ['Tab', Action.Swap],
   ['Digit1', Action.Num1],
   ['Digit2', Action.Num2],
 ]);

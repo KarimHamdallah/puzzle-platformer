@@ -53,6 +53,7 @@ export class SmokeQuest {
   private readonly covers: Phaser.Geom.Rectangle[];
   private readonly banner: (text: string, ms: number) => void;
   private readonly clouds: Cloud[] = [];
+  quietLoot = false; // the crate just gives the grenades (a banner, no dialogue): smoke is nothing new here
   private gunnerSeenX = Infinity; // px: walking past this, he sees the machine gun's ground
   private cache: Phaser.GameObjects.Image | null = null;
   private cacheX = 0;
@@ -74,7 +75,12 @@ export class SmokeQuest {
     if (!scene.textures.exists('smoke_puff')) makePuffTexture(scene);
   }
 
+  /** tileX <= 0: no such moment in this level (the threat is obvious from the start): the crate opens. */
   setGunnerSeenAt(tileX: number): void {
+    if (tileX <= 0) {
+      this.progress.sawGunner = true;
+      return;
+    }
     this.gunnerSeenX = tileX * TILE;
   }
 
@@ -114,7 +120,8 @@ export class SmokeQuest {
     this.throwables.smokes += SMOKE_PER_CACHE;
     p.smokes = this.throwables.smokes;
     this.cache.setTexture('ammo_crate_open');
-    this.dialogue.show(CACHE_LOOT, () => this.banner('NEW SKILL: SMOKE GRENADE  (throw with E)', 2800));
+    if (this.quietLoot) this.banner('+' + SMOKE_PER_CACHE + ' SMOKE GRENADES', 1600);
+    else this.dialogue.show(CACHE_LOOT, () => this.banner('NEW SKILL: SMOKE GRENADE  (throw with E)', 2800));
   }
 
   /** Smoke lifetimes, at the physics rate: a cloud stops being cover when it thins out. */
