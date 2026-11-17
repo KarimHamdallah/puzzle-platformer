@@ -79,7 +79,7 @@ export interface LevelData {
   startSmokes: number; // smoke grenades in hand at the start
   upgrades: Upgrade[]; // Mechanic 3: what the workbench builds (non-empty: parts, bench and built upgrades work here)
   grants: Upgrade[]; // Mechanic 3: upgrades you have here even if never built (from an earlier level)
-  pillTime: number; // Mechanic 3: s under water on a full breath bar (breath pills); 0 = no pills here
+  pillTime: number; // Mechanic 3: s a breath pill works, from the moment it is taken; 0 = no pills here
 }
 
 const HARD_INTRO = [
@@ -658,7 +658,7 @@ export const LEVELS: LevelData[] = [
     startSmokes: 0,
     upgrades: [Upgrade.Dash, Upgrade.Pills],
     grants: [Upgrade.DoubleJump], // the spring boots from Easy
-    pillTime: 10, // under water: ~5.5 s sprinting, ~8.5 s walking
+    pillTime: 16, // bench to far shore: ~11 s sprinting, ~14 s walking
   },
   { // Mechanic 3, Hard: everything in sequence: the pills through a flooded tunnel, then the dash across a sea
     map: M3_HARD_MAP,
@@ -680,6 +680,6 @@ export const LEVELS: LevelData[] = [
     startSmokes: 0,
     upgrades: [Upgrade.Dash, Upgrade.Pills],
     grants: [Upgrade.DoubleJump],
-    pillTime: 5, // short: stop in the tunnel's air pockets (~16 tiles apart, 2-3 s sprinting) to refill
+    pillTime: 5, // short: stop in the tunnel's air pockets (~16 tiles apart, 2-4 s) to refill
   },
 ];

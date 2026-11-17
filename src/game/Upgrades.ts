@@ -58,7 +58,7 @@ const RECIPES: Recipe[] = [ // indexed by Upgrade
   },
   {
     name: 'BREATH PILLS',
-    what: 'Breathe under water. The BREATH bar drains in the water and refills in the air (on land, or in an air pocket).',
+    what: 'Breathe under water while the BREATH bar lasts: it starts draining the moment you take them. Air pockets refill it.',
     icon: 'pills',
     needs: [0, 0, 0, 2, 1],
   },
