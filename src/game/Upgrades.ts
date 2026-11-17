@@ -58,14 +58,14 @@ const RECIPES: Recipe[] = [ // indexed by Upgrade
   },
   {
     name: 'BREATH PILLS',
-    what: 'Breathe under water while the clock on the HUD lasts (it starts when you take them). Run the sea floor.',
+    what: 'Breathe under water. The BREATH bar drains in the water and refills in the air (on land, or in an air pocket).',
     icon: 'pills',
     needs: [0, 0, 0, 2, 1],
   },
 ];
 
 /** Shown on the HUD while you have it: the skill and its key. */
-export const SKILL_HINTS = ['Double jump: Space in the air', 'Dash: X in the air', 'Breathe under water']; // indexed by Upgrade
+export const SKILL_HINTS = ['Double jump: Space in the air', 'Dash: X in the air', 'Breathe under water (BREATH bar)']; // indexed by Upgrade
 
 const PICKUP_RADIUS = 0.7; // tiles
 const BENCH_RANGE_X = 1.6 * TILE; // how close you must stand to use the bench
@@ -280,13 +280,28 @@ export class Scavenge {
     return false;
   }
 
-  private allBuilt(): boolean {
-    for (let i = 0; i < this.upgrades.length; i++) if (!this.built(this.upgrades[i])) return false;
+  /** Nothing left to build here: every upgrade is built, or the parts still in the level can't make the rest. */
+  private nothingLeft(): boolean {
+    for (let i = 0; i < this.upgrades.length; i++) {
+      const u = this.upgrades[i];
+      if (!this.built(u) && this.couldStillBuild(u)) return false;
+    }
+    return true;
+  }
+
+  /** The parts in hand plus the ones still lying in the level are enough for u. */
+  private couldStillBuild(u: Upgrade): boolean {
+    const needs = RECIPES[u].needs;
+    for (let p = 0; p < Part.Count; p++) {
+      let lying = 0;
+      for (let k = 0; k < this.pickups.length; k++) if (this.pickups[k].part === p && this.pickups[k].sprite.visible) lying++;
+      if (this.progress.parts[p] + lying < needs[p]) return false;
+    }
     return true;
   }
 
   private updateHud(): void {
-    const done = this.allBuilt();
+    const done = this.nothingLeft(); // the hunt is over: no counters
     for (let i = 0; i < this.hudParts.length; i++) {
       const p = this.hudParts[i];
       const need = this.neededHere(p);

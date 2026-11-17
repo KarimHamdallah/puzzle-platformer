@@ -46,6 +46,14 @@ const LISTEN_UNLOCK_KEY = 'upgrade:listen'; // localStorage: Listen Mode earned 
 const SUMMON_MIN_DISTANCE = 6; // tiles: when nothing off-screen is on your level, they appear at least this far
 const STOMP_NOISE = 4; // tiles
 const SCAVENGE_PATROL_RANGE = 3; // tiles: a patrolling Clicker in Mechanic 3 paces this far either side of its spot
+const BREATH_RECHARGE = 2.5; // s from an empty breath bar to full, out of the water
+const BREATH_LOW = 0.3; // the bar turns red under this
+const BREATH_BAR_X = 470; // HUD px: right of where Listen's bar sits
+const BREATH_BAR_Y = 38;
+const BREATH_BAR_W = 150;
+const BREATH_BAR_H = 12;
+const BREATH_READY = 0x8fc8ff; // the same colours as Listen's bar
+const BREATH_EMPTY = 0xff6a58;
 const WATER_COLOUR = 0x2f6f8f;
 const WATER_ALPHA = 0.55;
 const WATER_SURFACE = 0x9fd6e8;
@@ -169,7 +177,8 @@ export class LevelScene extends Phaser.Scene {
   private smokeQuest: SmokeQuest | null = null;
   private scavenge: Scavenge | null = null; // Mechanic 3: parts + workbench
   private breathesUnderwater = false; // Mechanic 3: breath pills (without them, water drowns you at once)
-  private pillsLeft = 0; // s of breath left from the last pill (taken when built, and again after a death)
+  private breath = 1; // 0..1 (breath pills): drains under water, refills in the air (like Listen's charge)
+  private breathBar: Phaser.GameObjects.Graphics | null = null; // HUD, drawn like the Listen bar
   private skillsText: Phaser.GameObjects.Text | null = null; // HUD: the upgrades you have, and their keys
   private heli: Helicopter | null = null;
   private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
@@ -235,7 +244,8 @@ export class LevelScene extends Phaser.Scene {
     this.smokeQuest = null;
     this.scavenge = null;
     this.breathesUnderwater = false;
-    this.pillsLeft = 0;
+    this.breath = 1;
+    this.breathBar = null;
     this.skillsText = null;
     this.heli = null;
     this.crates = [];
@@ -287,11 +297,7 @@ export class LevelScene extends Phaser.Scene {
     }
     if (LEVEL.upgrades.length > 0) { // Mechanic 3: the parts and the workbench
       this.scavenge = new Scavenge(this, this.controls, this.progress, LEVEL.upgrades, (text, ms) => this.banner(text, ms));
-      this.scavenge.onBuilt = (u) => {
-        if (u === Upgrade.Pills) this.pillsLeft = LEVEL.pillTime; // swallowed now: the clock is running
-        this.applyUpgrades();
-      };
-      if (this.progress.built[Upgrade.Pills]) this.pillsLeft = LEVEL.pillTime; // after a death: another pill
+      this.scavenge.onBuilt = () => this.applyUpgrades();
     }
     this.spawnEntities();
     this.player.covers = this.covers;
@@ -401,6 +407,7 @@ export class LevelScene extends Phaser.Scene {
       this.hudCount.setAlpha(both && smokeNext ? HUD_UNSELECTED_ALPHA : 1);
     }
     this.noiseMeter.update(deltaMs, this.player.noiseLevel, this.player.stepCount, this.player.landCount, this.noise.masked);
+    this.drawBreathBar();
     if (this.zombieDebug) this.zombieDebug.draw(this.player);
   }
 
@@ -431,20 +438,18 @@ export class LevelScene extends Phaser.Scene {
     if (!this.player.dead) {
       this.updateCheckpoints();
       this.stompsAndContacts();
-      if (this.pillsLeft > 0) { // the pill wears off
-        const shown = Math.ceil(this.pillsLeft);
-        this.pillsLeft = Math.max(0, this.pillsLeft - dt);
-        if (Math.ceil(this.pillsLeft) !== shown) this.applyUpgrades(); // the HUD's seconds, and at 0 no more breath
-        if (this.pillsLeft === 0) this.banner('THE PILLS WORE OFF', 1500);
-      }
+      // Water: in it up to the chest. Without the pills he drowns at once; with them the breath bar drains
+      // (a full bar lasts LEVEL.pillTime s) and refills out of the water: on land, or in an air pocket.
       const b = this.player.body;
-      const cx = Math.floor(b.center.x / TILE);
-      const cy = Math.floor(b.center.y / TILE);
-      if (this.progress.built[Upgrade.Pills] && isAir(cx, cy) && this.pillsLeft < LEVEL.pillTime) { // a breath: the clock is full again
-        this.pillsLeft = LEVEL.pillTime;
-        this.applyUpgrades();
-      }
-      if (!this.breathesUnderwater && isWater(cx, cy)) this.player.kill(); // in the water up to the chest, without the pills: he drowns at once
+      const underwater = isWater(Math.floor(b.center.x / TILE), Math.floor(b.center.y / TILE));
+      if (underwater && !this.breathesUnderwater) this.player.kill();
+      else if (underwater && !this.cheating) {
+        this.breath -= dt / LEVEL.pillTime;
+        if (this.breath <= 0) { // out of air
+          this.breath = 0;
+          this.player.kill();
+        }
+      } else if (!underwater) this.breath = Math.min(1, this.breath + dt / BREATH_RECHARGE);
     }
     if (this.player.dead && !this.restarting && !this.deathHandled) { // caught: by contact or by a bad punch
       this.deathHandled = true;
@@ -609,6 +614,19 @@ export class LevelScene extends Phaser.Scene {
     if (this.cheating && this.smokeQuest && this.throwables.smokes < 9) this.throwables.smokes = 9; // smoke too
   }
 
+  /** The breath bar: shown once you have the pills. Blue, red when it runs low; brighter under water. */
+  private drawBreathBar(): void {
+    const g = this.breathBar;
+    if (!g) return;
+    g.clear();
+    if (!this.breathesUnderwater) return;
+    const b = this.player.body;
+    const underwater = isWater(Math.floor(b.center.x / TILE), Math.floor(b.center.y / TILE));
+    g.fillStyle(0x000000, 0.65).fillRect(BREATH_BAR_X - 3, BREATH_BAR_Y - 3, BREATH_BAR_W + 6, BREATH_BAR_H + 6);
+    g.fillStyle(this.breath < BREATH_LOW ? BREATH_EMPTY : BREATH_READY, underwater ? 1 : 0.85);
+    g.fillRect(BREATH_BAR_X, BREATH_BAR_Y, BREATH_BAR_W * this.breath, BREATH_BAR_H);
+  }
+
   /** Water: a translucent blue in front of the player (he is IN it), a light line on its surface. */
   private drawWater(): void {
     const g = this.add.graphics().setDepth(13);
@@ -631,17 +649,10 @@ export class LevelScene extends Phaser.Scene {
     const m3 = this.scavenge !== null;
     p.canDoubleJump = m3 && this.hasUpgrade(Upgrade.DoubleJump);
     p.canDash = m3 && this.hasUpgrade(Upgrade.Dash);
-    this.breathesUnderwater = m3 && (this.cheating || (this.hasUpgrade(Upgrade.Pills) && this.pillsLeft > 0));
+    this.breathesUnderwater = m3 && this.hasUpgrade(Upgrade.Pills);
     if (this.skillsText) { // what you can do now, and the key
       const lines: string[] = [];
-      for (let u = 0; u < Upgrade.Count; u++) {
-        if (!m3 || !this.hasUpgrade(u)) continue;
-        if (u === Upgrade.Pills && !this.cheating) { // only while it lasts, with the seconds left
-          if (this.pillsLeft > 0) lines.push(SKILL_HINTS[u] + ':  ' + Math.ceil(this.pillsLeft) + ' s');
-          continue;
-        }
-        lines.push(SKILL_HINTS[u]);
-      }
+      for (let u = 0; u < Upgrade.Count; u++) if (m3 && this.hasUpgrade(u)) lines.push(SKILL_HINTS[u]);
       this.skillsText.setText(lines.join('\n'));
     }
   }
@@ -718,6 +729,12 @@ export class LevelScene extends Phaser.Scene {
       this.cheatText = this.add.text(24, 140, '', {
         fontFamily: 'Georgia, serif', fontSize: '20px', fontStyle: 'bold', color: '#ff9a40', stroke: '#000000', strokeThickness: 4,
       }).setScrollFactor(0).setDepth(50);
+    }
+    if (LEVEL.pillTime > 0) { // the breath bar, like Listen's: label above, a bar under it (drawn each frame)
+      this.breathBar = this.add.graphics().setScrollFactor(0).setDepth(50);
+      this.add.text(BREATH_BAR_X, BREATH_BAR_Y - 4, 'BREATH', {
+        fontFamily: 'Georgia, serif', fontSize: '16px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
     }
     if (this.scavenge) {
       this.skillsText = this.add.text(24, 172, '', {
