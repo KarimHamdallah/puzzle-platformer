@@ -25,6 +25,8 @@ class PlayerTuning {
   jumpHeight = 3.2; // tiles, full held jump
   timeToApex = 0.36; // s
   doubleJumpHeight = 2.4; // tiles, the second jump in the air (Mechanic 3: spring boots)
+  dashSpeed = 22; // tiles/s, the air dash (Mechanic 3: brace boots)
+  dashTime = 0.15; // s: dashSpeed x dashTime = ~3.3 tiles, no gravity meanwhile
   fallGravityMult = 1.7; // falling is faster than rising = snappy, not floaty
   jumpCutGravityMult = 2.6; // jump released while rising -> short hop
   apexThreshold = 1.5; // tiles/s: near the top of the arc...
@@ -120,6 +122,10 @@ export class Player {
   invisible = false; // cheat: nothing can see, sense or catch him
   canDoubleJump = false; // Mechanic 3: spring boots built (the scene sets it)
   private airJumpUsed = false; // the double jump is spent until he lands
+  canDash = false; // Mechanic 3: X in the air dashes (the scene sets it)
+  private dashUsed = false; // one dash per time in the air
+  private dashTimer = 0; // s left in the current dash
+  silentSoles = false; // Mechanic 3: walking and landing make no noise (sprinting still does)
   pinned = false; // a machine gun is on him: frozen in place, flinching, until it kills him
   listenExhausted = false; // ran dry: locked until fully recharged
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
@@ -229,6 +235,7 @@ export class Player {
       this.lastGroundedAt = this.simTime;
       this.jumping = false;
       this.airJumpUsed = false;
+      this.dashUsed = false;
     } else {
       this.airborneVy = b.velocity.y;
     }
@@ -301,17 +308,31 @@ export class Player {
       this.jump();
     }
 
-    // Gravity with modifiers.
-    const jumpHeld = this.input.held(Action.Jump);
-    let mult = 1;
-    if (vy > 0) mult = T.fallGravityMult;
-    else if (vy < 0 && this.jumping && !jumpHeld) mult = T.jumpCutGravityMult;
-    if (this.jumping && jumpHeld && Math.abs(vy) < T.apexThreshold * TILE) mult *= T.apexGravityMult;
+    // Dash: X in the air, once until he lands. A straight burst the way he faces: fixed speed, no gravity.
+    if (this.canDash && !onGround && !this.dashUsed && !locked && this.input.buffered(Action.Attack, T.jumpBufferMs)) {
+      this.input.consume(Action.Attack);
+      this.dashUsed = true;
+      this.dashTimer = T.dashTime;
+      this.pulseScale(1 + T.squash, 1 - T.squash, 140); // stretched by the burst
+    }
     const fastFalling = vy > 0 && this.input.held(Action.Down);
-    if (fastFalling) mult *= T.fastFallGravityMult;
+    if (this.dashTimer > 0) {
+      this.dashTimer -= dt;
+      // the burst; on its last step back to a sprint, so a dash is always the same extra distance
+      vx = this.facing * (this.dashTimer > 0 ? T.dashSpeed : T.sprintSpeed) * TILE;
+      vy = 0;
+    } else {
+      // Gravity with modifiers.
+      const jumpHeld = this.input.held(Action.Jump);
+      let mult = 1;
+      if (vy > 0) mult = T.fallGravityMult;
+      else if (vy < 0 && this.jumping && !jumpHeld) mult = T.jumpCutGravityMult;
+      if (this.jumping && jumpHeld && Math.abs(vy) < T.apexThreshold * TILE) mult *= T.apexGravityMult;
+      if (fastFalling) mult *= T.fastFallGravityMult;
 
-    vy += g * mult * dt;
-    vy = Math.min(vy, (fastFalling ? T.fastFallSpeed : T.maxFallSpeed) * TILE);
+      vy += g * mult * dt;
+      vy = Math.min(vy, (fastFalling ? T.fastFallSpeed : T.maxFallSpeed) * TILE);
+    }
 
     // Forgiveness: look one step ahead and fix "missed by a few pixels" before Arcade collides.
     if (vy < 0) this.correctCorner(vy * dt);
@@ -494,7 +515,9 @@ export class Player {
     if (this.stepDistance < T.strideLength * TILE) return;
     this.stepDistance = 0;
     if (this.crouched) return; // sneaking is silent
-    const radius = speed > T.walkSpeed * TILE * 1.1 ? T.sprintNoise : T.walkNoise;
+    const sprinting = speed > T.walkSpeed * TILE * 1.1;
+    if (this.silentSoles && !sprinting) return; // rubber soles: walking is silent too
+    const radius = sprinting ? T.sprintNoise : T.walkNoise;
     this.noise.emit(this.feetX, this.feetY, radius, NoiseKind.Footstep);
     this.stepCount++;
   }
@@ -504,7 +527,7 @@ export class Player {
     if (!this.grounded || this.crouched || this.dead) return 0;
     const speed = Math.abs(this.body.velocity.x);
     if (speed > T.walkSpeed * TILE * 1.1) return 2;
-    return speed > 10 ? 1 : 0;
+    return speed > 10 && !this.silentSoles ? 1 : 0;
   }
 
   private behindCover(): boolean {
@@ -619,7 +642,7 @@ export class Player {
     const impact = Phaser.Math.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
     this.pulseScale(1 + T.squash * impact, 1 - T.squash * impact, 130);
     if (impact > 0.2) this.landTimer = LAND_ANIM_TIME; // small hops don't need the crouch pose
-    if (impact > 0.45) { // hard landings are loud
+    if (impact > 0.45 && !this.silentSoles) { // hard landings are loud (rubber soles: silent)
       this.noise.emit(this.feetX, this.feetY, T.landNoise, NoiseKind.Landing);
       this.landCount++;
     }
@@ -688,6 +711,8 @@ class PlayerDebug {
     t.add('jumpHeight', 0.5, 8, 0.1);
     t.add('timeToApex', 0.1, 1, 0.01);
     t.add('doubleJumpHeight', 0.5, 6, 0.1);
+    t.add('dashSpeed', 5, 40, 0.5);
+    t.add('dashTime', 0.05, 0.5, 0.01);
     t.add('fallGravityMult', 0.5, 4, 0.05);
     t.add('jumpCutGravityMult', 1, 6, 0.1);
     t.add('apexThreshold', 0, 6, 0.1);

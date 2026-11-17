@@ -266,13 +266,13 @@ export class LevelScene extends Phaser.Scene {
       this.quest = new MolotovQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.locks,
         (text, ms) => this.banner(text, ms));
     }
-    if (LEVEL.upgrade !== null) { // Mechanic 3: the parts and the workbench
-      this.scavenge = new Scavenge(this, this.controls, this.progress, LEVEL.upgrade, (text, ms) => this.banner(text, ms));
-      this.scavenge.onBuilt = () => { this.player.canDoubleJump = true; };
+    if (LEVEL.upgrades.length > 0) { // Mechanic 3: the parts and the workbench
+      this.scavenge = new Scavenge(this, this.controls, this.progress, LEVEL.upgrades, (text, ms) => this.banner(text, ms));
+      this.scavenge.onBuilt = () => this.applyUpgrades();
     }
     this.spawnEntities();
     this.player.covers = this.covers;
-    this.player.canDoubleJump = LEVEL.upgrade !== null && upgradeBuilt(Upgrade.DoubleJump);
+    this.applyUpgrades();
     this.player.zombies = this.zombies;
     this.throwables.zombies = this.zombies;
 
@@ -561,10 +561,10 @@ export class LevelScene extends Phaser.Scene {
         if (this.smokeQuest) this.throwables.smokes = this.smokesBeforeCheat;
         this.locks.cheatCloseDoors(this.player.body);
       }
-      if (this.scavenge) this.player.canDoubleJump = this.cheating || upgradeBuilt(Upgrade.DoubleJump); // spring boots on loan
+      this.applyUpgrades(); // the cheat lends every upgrade
       this.banner(this.cheating ? 'CHEATS ON' : 'CHEATS OFF', 1200);
       const unlimited = this.smokeQuest ? 'UNLIMITED BOTTLES + SMOKE' : 'UNLIMITED BOTTLES';
-      const extra = this.scavenge ? '  DOUBLE JUMP' : '';
+      const extra = this.scavenge ? '  EVERY UPGRADE' : '';
       if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: ' + unlimited + '  INVISIBLE  DOORS OPEN' + extra : '');
     }
     if (this.scavenge && this.controls.pressed(Action.Num2)) { // dev: forget built upgrades, replay from scratch
@@ -576,6 +576,19 @@ export class LevelScene extends Phaser.Scene {
     }
     if (this.cheating && this.throwables.count < 9) this.throwables.count = 9;
     if (this.cheating && this.smokeQuest && this.throwables.smokes < 9) this.throwables.smokes = 9; // smoke too
+  }
+
+  /** Mechanic 3: what the player can do here: upgrades built (saved), given by the level, or lent by the cheat. */
+  private applyUpgrades(): void {
+    const p = this.player;
+    const m3 = this.scavenge !== null;
+    p.canDoubleJump = m3 && this.hasUpgrade(Upgrade.DoubleJump);
+    p.canDash = m3 && this.hasUpgrade(Upgrade.Dash);
+    p.silentSoles = m3 && this.hasUpgrade(Upgrade.SilentSoles);
+  }
+
+  private hasUpgrade(u: Upgrade): boolean {
+    return this.cheating || upgradeBuilt(u) || LEVEL.grants.includes(u);
   }
 
   /** Back to the level select (Esc, or after finishing the level). */
@@ -661,7 +674,7 @@ export class LevelScene extends Phaser.Scene {
       + (this.player.canListen ? '   Listen Q (hold)' : '') + (LEVEL.heli ? '   Bottle / smoke Tab' : '')
       + '   Checkpoint R   Levels Esc'
       + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles' + (this.smokeQuest ? ' / smoke' : '') + ' + invisible + every door open'
-        + (this.scavenge ? ' + double jump      2: forget built upgrades (restart from scratch)' : '') : ''), {
+        + (this.scavenge ? ' + every upgrade      2: forget built upgrades (restart from scratch)' : '') : ''), {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }
@@ -874,6 +887,12 @@ export class LevelScene extends Phaser.Scene {
             break;
           case 'T':
             if (this.scavenge) this.scavenge.addBench(feetX, feetY);
+            break;
+          case 'I':
+            if (this.scavenge) this.scavenge.addPart(Part.Wire, feetX, feetY);
+            break;
+          case 'M':
+            if (this.scavenge) this.scavenge.addPart(Part.Rubber, feetX, feetY);
             break;
           case 'A':
             this.add.image(feetX, feetY + 2, 'tent').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);

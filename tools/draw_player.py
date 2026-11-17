@@ -869,6 +869,55 @@ def draw_spring_boots_sprite():
     return c.image().crop((1, 0, 18, 22))
 
 
+def draw_wire_sprite():
+    """Mechanic 3 part: a coil of steel wire, 16x14 px: three loops, lit on top."""
+    c = Canvas()
+    for i, (cx, cy) in enumerate(((7, 7), (8, 7), (9, 7))):
+        for a in range(0, 360, 12):
+            x = round(cx + 5 * math.cos(math.radians(a)))
+            y = round(cy + 4 * math.sin(math.radians(a)))
+            c.put(x, y, 'V' if y < cy else '5')
+    c.stroke((13, 9), (15, 12), 1, 'V')             # loose end
+    c.outline()
+    return c.image().crop((0, 1, 17, 15))
+
+
+def draw_rubber_sprite():
+    """Mechanic 3 part: a chunk cut from a tyre, 18x10 px: black rubber, tread grooves."""
+    c = Canvas()
+    c.rect(1, 3, 16, 8, '4')
+    c.row(2, 3, 14, '4')
+    for x in (3, 7, 11, 15):
+        c.rect(x, 3, x, 5, '5')                     # tread
+    c.row(8, 1, 16, '7')
+    c.outline()
+    return c.image().crop((0, 0, 18, 10))
+
+
+def draw_brace_boots_sprite():
+    """Upgrade icon: a work boot with steel wire braces up the leg (the dash), 18x22 px."""
+    c = Canvas()
+    c.rect(4, 2, 10, 15, 'O'); c.rect(4, 16, 15, 18, 'O'); c.row(19, 3, 15, 'o')     # boot
+    c.stroke((3, 4), (3, 17), 1, '5'); c.stroke((11, 4), (11, 15), 1, '5')          # braces
+    for y in (5, 9, 13):
+        c.row(y, 3, 11, 'V')                        # wire wraps
+    c.row(16, 4, 9, 'L'); c.put(8, 16, 'Y')         # the strap
+    c.outline()
+    return c.image().crop((1, 0, 18, 22))
+
+
+def draw_rubber_soles_sprite():
+    """Upgrade icon: a work boot on a thick tyre-rubber sole (silent steps), 18x22 px."""
+    c = Canvas()
+    c.rect(4, 2, 10, 13, 'O'); c.rect(4, 14, 15, 16, 'O')                           # boot
+    c.row(9, 4, 10, 'L'); c.put(9, 9, 'Y')          # the strap
+    c.rect(3, 17, 16, 20, '4')                      # the rubber sole
+    for x in (5, 9, 13):
+        c.put(x, 20, '5')
+    c.outline()
+    return c.image().crop((1, 0, 18, 22))
+
+
 def draw_workbench_sprite():
     """Mechanic 3: the workbench where parts become upgrades: wooden top, a vise, tools, 64x40 px."""
     c = Canvas()
@@ -949,8 +998,13 @@ def main():
     draw_strap_sprite().save(os.path.join(out_dir, 'strap.png'))
     draw_spring_boots_sprite().save(os.path.join(out_dir, 'spring_boots.png'))
     draw_workbench_sprite().save(os.path.join(out_dir, 'workbench.png'))
+    draw_wire_sprite().save(os.path.join(out_dir, 'wire.png'))
+    draw_rubber_sprite().save(os.path.join(out_dir, 'rubber.png'))
+    draw_brace_boots_sprite().save(os.path.join(out_dir, 'brace_boots.png'))
+    draw_rubber_soles_sprite().save(os.path.join(out_dir, 'rubber_soles.png'))
     if preview_dir:
-        items = [draw_workbench_sprite(), draw_spring_sprite(), draw_strap_sprite(), draw_spring_boots_sprite()]
+        items = [draw_workbench_sprite(), draw_spring_sprite(), draw_strap_sprite(), draw_spring_boots_sprite(),
+                 draw_wire_sprite(), draw_rubber_sprite(), draw_brace_boots_sprite(), draw_rubber_soles_sprite()]
         pw = sum(i.width for i in items) + 10 * len(items)
         ph = max(i.height for i in items)
         prev = Image.new('RGBA', (pw, ph), (90, 96, 110, 255))
