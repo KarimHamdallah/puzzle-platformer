@@ -24,6 +24,7 @@ class PlayerTuning {
   // jump
   jumpHeight = 3.2; // tiles, full held jump
   timeToApex = 0.36; // s
+  doubleJumpHeight = 2.4; // tiles, the second jump in the air (Mechanic 3: spring boots)
   fallGravityMult = 1.7; // falling is faster than rising = snappy, not floaty
   jumpCutGravityMult = 2.6; // jump released while rising -> short hop
   apexThreshold = 1.5; // tiles/s: near the top of the arc...
@@ -91,6 +92,11 @@ function jumpSpeed(): number {
   return (2 * T.jumpHeight * TILE) / T.timeToApex; // px/s
 }
 
+/** Launch speed for the double jump: v² = 2·g·h, with the same gravity as the first jump. */
+function doubleJumpSpeed(): number {
+  return Math.sqrt(2 * gravity() * T.doubleJumpHeight * TILE); // px/s
+}
+
 function moveTowards(current: number, target: number, maxDelta: number): number {
   if (Math.abs(target - current) <= maxDelta) return target;
   return current + Math.sign(target - current) * maxDelta;
@@ -112,6 +118,8 @@ export class Player {
   listening = false; // holding Listen: frozen, crouched, silent (the scene draws what he hears)
   listenEnergy = 1; // 0..1: drains while listening, recharges otherwise
   invisible = false; // cheat: nothing can see, sense or catch him
+  canDoubleJump = false; // Mechanic 3: spring boots built (the scene sets it)
+  private airJumpUsed = false; // the double jump is spent until he lands
   pinned = false; // a machine gun is on him: frozen in place, flinching, until it kills him
   listenExhausted = false; // ran dry: locked until fully recharged
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
@@ -220,6 +228,7 @@ export class Player {
       if (!this.grounded) this.land();
       this.lastGroundedAt = this.simTime;
       this.jumping = false;
+      this.airJumpUsed = false;
     } else {
       this.airborneVy = b.velocity.y;
     }
@@ -283,6 +292,12 @@ export class Player {
       // +half a gravity step: gravity is applied below in this same step, and the fixed-step
       // integrator would otherwise lose ~jumpHeight*dt/timeToApex (≈0.15 tiles) on every jump.
       vy = -(jumpSpeed() + 0.5 * g * dt);
+      this.jump();
+    } else if (this.canDoubleJump && !this.airJumpUsed && !onGround && !locked && this.input.buffered(Action.Jump, T.jumpBufferMs)) {
+      // Spring boots: one more jump in the air. It replaces the fall speed (a fresh launch, not a boost).
+      this.input.consume(Action.Jump);
+      this.airJumpUsed = true;
+      vy = -(doubleJumpSpeed() + 0.5 * g * dt);
       this.jump();
     }
 
@@ -672,6 +687,7 @@ class PlayerDebug {
     t.add('airDecelTime', 0, 1, 0.01);
     t.add('jumpHeight', 0.5, 8, 0.1);
     t.add('timeToApex', 0.1, 1, 0.01);
+    t.add('doubleJumpHeight', 0.5, 6, 0.1);
     t.add('fallGravityMult', 0.5, 4, 0.05);
     t.add('jumpCutGravityMult', 1, 6, 0.1);
     t.add('apexThreshold', 0, 6, 0.1);

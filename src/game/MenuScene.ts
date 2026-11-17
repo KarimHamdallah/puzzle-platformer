@@ -63,6 +63,15 @@ const SECTIONS: MenuSection[] = [
       { scene: 'Level', level: 5, label: 'HARD', title: 'Escape', blurb: 'A helicopter hunts you down the valley.', thumb: THUMB_M2_HARD },
     ],
   },
+  {
+    heading: 'MECHANIC 3  -  SCAVENGE & UPGRADE',
+    subheading: 'Search the ruins for parts, build upgrades at the workbench, reach what you could not before.',
+    levels: [
+      { scene: 'Level', level: 6, label: 'EASY', title: 'Spring Boots', blurb: 'A cliff too high. Find the parts, build the boots.', thumb: '' },
+      { scene: '', level: 0, label: 'MEDIUM', title: 'Coming soon', blurb: 'More parts, a second upgrade.', thumb: '' },
+      { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Everything you built, together.', thumb: '' },
+    ],
+  },
 ];
 
 const CARD_W = 420;
@@ -71,7 +80,10 @@ const THUMB_H = 108;
 const PAD = 12;
 const LEFT = 120; // x of the first card / headings
 const GAP = 40;
-const SECTION_Y = [88, 398, 708]; // heading y per section (cards end 72 + CARD_H below, then a gap)
+const SECTION_TOP = 88; // heading y of the first section
+const SECTION_STEP = 310; // heading to heading (cards end 72 + CARD_H below the heading, then a gap)
+const TOP_BAND = 92; // the fixed title strip: the list scrolls under it
+const BOTTOM_BAND = 56; // the fixed key help strip
 const GOLD = 0xffd24a;
 const CREAM = 0xf0e6c8;
 const TEXT_STYLE = { fontFamily: 'Georgia, serif', color: '#f0e6c8' };
@@ -82,6 +94,11 @@ interface Card {
   entry: LevelEntry;
   container: Phaser.GameObjects.Container;
   frame: Phaser.GameObjects.Graphics;
+}
+
+/** Heading y of section s (world space: the camera scrolls the list). */
+function sectionY(s: number): number {
+  return SECTION_TOP + s * SECTION_STEP;
 }
 
 let lastSection = 1; // remembered between visits: back from a level, the cursor is where you left it
@@ -121,29 +138,33 @@ export class MenuScene extends Phaser.Scene {
     const h = this.scale.height;
 
     const layers = ['bg_sky', 'bg_far', 'bg_mid', 'bg_near'];
-    for (let i = 0; i < layers.length; i++) this.parallax.push(this.add.tileSprite(0, 0, w, h, layers[i]).setOrigin(0, 0));
-    this.add.rectangle(0, 0, w, h, 0x0b0a08, 0.62).setOrigin(0, 0);
+    // Fixed to the screen (scroll factor 0): the background, the title strip, the key help. The list scrolls.
+    for (let i = 0; i < layers.length; i++) this.parallax.push(this.add.tileSprite(0, 0, w, h, layers[i]).setOrigin(0, 0).setScrollFactor(0));
+    this.add.rectangle(0, 0, w, h, 0x0b0a08, 0.62).setOrigin(0, 0).setScrollFactor(0);
+    this.add.rectangle(0, 0, w, TOP_BAND, 0x0b0a08, 0.85).setOrigin(0, 0).setScrollFactor(0).setDepth(10);
+    this.add.rectangle(0, h - BOTTOM_BAND, w, BOTTOM_BAND, 0x0b0a08, 0.85).setOrigin(0, 0).setScrollFactor(0).setDepth(10);
 
     this.add.text(w / 2, 48, 'LEVEL SELECT', {
       ...TEXT_STYLE, fontSize: '56px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 8,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(11);
 
     for (let s = 0; s < SECTIONS.length; s++) {
       const sec = SECTIONS[s];
-      const y = SECTION_Y[s];
+      const y = sectionY(s);
       this.add.text(LEFT, y, sec.heading, { ...TEXT_STYLE, fontSize: '34px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 5 });
       this.add.text(LEFT, y + 40, sec.subheading, { ...TEXT_STYLE, fontSize: '22px', stroke: '#000000', strokeThickness: 3 });
       for (let c = 0; c < sec.levels.length; c++) this.cards.push(this.createCard(s, c, sec.levels[c], LEFT + c * (CARD_W + GAP), y + 72));
     }
 
     this.notice = this.add.text(w - 40, 48, '', { ...TEXT_STYLE, fontSize: '26px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 5 })
-      .setOrigin(1, 0.5).setAlpha(0);
-    this.add.text(w / 2, h - 26, '← ↑ ↓ →  choose      Space / Enter  play      Esc in a level  back here      mouse works too', {
+      .setOrigin(1, 0.5).setAlpha(0).setScrollFactor(0).setDepth(11);
+    this.add.text(w / 2, h - 16, '← ↑ ↓ →  choose      Space / Enter  play      Esc in a level  back here      mouse works too', {
       ...TEXT_STYLE, fontSize: '22px', stroke: '#000000', strokeThickness: 4,
-    }).setOrigin(0.5, 1);
+    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(11);
 
     this.controls = new InputActions();
     this.select(this.section, this.col);
+    this.cameras.main.scrollY = this.scrollFor(this.section, 0); // back from a level: already there, no slide
     this.cameras.main.fadeIn(200);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.controls.destroy());
   }
@@ -270,6 +291,25 @@ export class MenuScene extends Phaser.Scene {
       this.tweens.killTweensOf(card.container);
       this.tweens.add({ targets: card.container, scale: on ? 1.04 : 1, duration: 120, ease: 'Quad.easeOut' });
     }
+    // Keep the chosen section on screen: slide the list just enough.
+    const cam = this.cameras.main;
+    const target = this.scrollFor(section, cam.scrollY);
+    if (target !== cam.scrollY) {
+      this.tweens.killTweensOf(cam);
+      this.tweens.add({ targets: cam, scrollY: target, duration: 220, ease: 'Quad.easeOut' });
+    }
+  }
+
+  /** The camera scroll that shows the whole section (heading to card bottom) between the two strips. */
+  private scrollFor(section: number, current: number): number {
+    const h = this.scale.height;
+    const top = sectionY(section) - 8;
+    const bottom = sectionY(section) + 72 + CARD_H + 16;
+    let scroll = current;
+    if (bottom - scroll > h - BOTTOM_BAND) scroll = bottom - (h - BOTTOM_BAND);
+    if (top - scroll < TOP_BAND) scroll = top - TOP_BAND;
+    const maxScroll = Math.max(0, sectionY(SECTIONS.length - 1) + 72 + CARD_H + 16 - (h - BOTTOM_BAND));
+    return Phaser.Math.Clamp(scroll, 0, maxScroll);
   }
 
   private play(entry: LevelEntry): void {

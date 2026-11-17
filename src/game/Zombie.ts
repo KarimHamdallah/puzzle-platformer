@@ -127,6 +127,7 @@ export class Zombie {
   health: number;
   distracted = false; // Clicker: busy with a bottle / scream (the only time it can be taken down)
   hasKey = false; // guardian: drops the key of a locked door when it dies (the scene drops it)
+  patrolRange = 0; // tiles either side of home it paces (0: walks until a wall or a ledge)
   summons = 0; // Screamer: Runners her scream just called in (the scene spawns them and resets this)
   feeding = false; // horde Clicker: eats at its post, hears the player only up close
 
@@ -649,7 +650,8 @@ export class Zombie {
       b.setVelocityX(0);
       return;
     }
-    if (this.onGround() && (this.wallAhead() || !this.groundAhead())) {
+    const tooFar = this.patrolRange > 0 && (this.feetX - this.homeX) * this.dir > this.patrolRange * TILE;
+    if (tooFar || (this.onGround() && (this.wallAhead() || !this.groundAhead()))) {
       this.dir = -this.dir;
       this.timer = pause;
       b.setVelocityX(0);

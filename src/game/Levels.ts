@@ -17,6 +17,7 @@
 
 import type { HeliDef } from './Helicopter';
 import { SniperKind, type SniperDef } from './Sniper';
+import { Part, Upgrade } from './Upgrades';
 
 /** Coloured keys (Medium): the car trunk's three padlocks. */
 export enum KeyColor {
@@ -53,6 +54,8 @@ export class LevelProgress {
   smokes = 0; // smoke grenades in hand
   crateHp: number[] = []; // M2 Medium: each breakable crate's hits left (by spawn order); damage survives a death
   smokesAtCheckpoint = -1; // M2 Hard: smoke grenades held at the last checkpoint (-1: none passed yet)
+  parts: number[] = new Array<number>(Part.Count).fill(0); // Mechanic 3: parts in hand, indexed by Part
+  partsTaken: number[] = []; // Mechanic 3: pickups already taken (spawn order), gone after a death too
 }
 
 export interface LevelData {
@@ -73,6 +76,7 @@ export interface LevelData {
   revealed: [number, number][]; // scaffolding tiles that appear once the machine gun has been seen
   heli: HeliDef | null; // M2 Hard: the helicopter that hunts you down the valley
   startSmokes: number; // smoke grenades in hand at the start
+  upgrade: Upgrade | null; // Mechanic 3: what the workbench builds (non-null: parts, bench and built upgrades work here)
 }
 
 const HARD_INTRO = [
@@ -299,6 +303,45 @@ const M2_HARD_MAP: string[] = [
   '##########################################################################################################################################################################',
 ];
 
+const M3_EASY_INTRO = [
+  'جرفٌ عالٍ يسدّ الطريق... لن أبلغ أعلاه بقفزةٍ واحدة.',
+  'وهنا طاولة عملٍ قديمة، وعليها رسمٌ لحذاءٍ مثبّتٍ على نوابض.',
+  'نابضان وحزامٌ جلدي... في هذه الخرائب غربًا لا بد أن أجد ما أحتاجه.',
+];
+
+const M3_EASY_MAP: string[] = [
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#..........................................................................................................#',
+  '#............................................O..........................................#####..............#',
+  '#...........................................####........................................#####..............#',
+  '#...........................................####....................#########...........#####..............#',
+  '#.......................................############................#########...........#####..............#',
+  '#....................................x..############................#########.........#######..............#',
+  '#...................................##################..............#########.........#######..............#',
+  '#.................O....c............##################.......P..T...#########.........#######.........E....#',
+  '###.............############################################################################################',
+  '###..U.....C....############################################################################################',
+  '############################################################################################################',
+  '############################################################################################################',
+];
+
 export const LEVELS: LevelData[] = [
   { // Mechanic 1, Easy: tunnel, yard, three-floor building, rooftops
     map: EASY_MAP,
@@ -326,6 +369,7 @@ export const LEVELS: LevelData[] = [
     revealed: [],
     heli: null,
     startSmokes: 0,
+    upgrade: null,
   },
   { // Mechanic 1, Medium: the horde and the Molotov
     map: MEDIUM_MAP,
@@ -349,6 +393,7 @@ export const LEVELS: LevelData[] = [
     revealed: [],
     heli: null,
     startSmokes: 0,
+    upgrade: null,
   },
   { // Mechanic 1, Hard: night. Listen Mode, one-bottle stashes, thunder
     map: HARD_MAP,
@@ -372,6 +417,7 @@ export const LEVELS: LevelData[] = [
     revealed: [],
     heli: null,
     startSmokes: 0,
+    upgrade: null,
   },
   { // Mechanic 2, Easy: the tower sniper, then the machine gun
     map: M2_EASY_MAP,
@@ -407,6 +453,7 @@ export const LEVELS: LevelData[] = [
     revealed: [],
     heli: null,
     startSmokes: 0,
+    upgrade: null,
   },
   { // Mechanic 2, Medium: the mad sniper, cover that breaks, smoke stolen from the army
     map: M2_MEDIUM_MAP,
@@ -451,6 +498,7 @@ export const LEVELS: LevelData[] = [
     ],
     heli: null,
     startSmokes: 0,
+    upgrade: null,
   },
   { // Mechanic 2, Hard: the helicopter escape (everything from Easy and Medium, on the move)
     map: M2_HARD_MAP,
@@ -470,5 +518,26 @@ export const LEVELS: LevelData[] = [
     revealed: [],
     heli: { y: 17, safeX: 152.5 },
     startSmokes: 1,
+    upgrade: null,
+  },
+  { // Mechanic 3, Easy: scavenge two springs and a strap, build the spring boots (double jump)
+    map: M3_EASY_MAP,
+    guardians: [],
+    doorKeys: [],
+    keyGroups: [],
+    night: false,
+    stashSize: 0,
+    grantsListen: false,
+    intro: M3_EASY_INTRO,
+    introBanner: '',
+    hints: [],
+    cheats: true,
+    snipers: [],
+    breakableCrates: false,
+    gunnerSeenAt: 0,
+    revealed: [],
+    heli: null,
+    startSmokes: 0,
+    upgrade: Upgrade.DoubleJump,
   },
 ];

@@ -16,6 +16,7 @@ import { Player } from './Player';
 import { SmokeQuest } from './Smoke';
 import { Sniper } from './Sniper';
 import { Throwables } from './Throwing';
+import { forgetUpgrades, Part, Scavenge, Upgrade, upgradeBuilt } from './Upgrades';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 
 // ---------------------------------------------------------------- the current level
@@ -25,6 +26,14 @@ let LEVEL: LevelData = LEVELS[0];
 let MAP: string[] = LEVEL.map;
 let MAP_W = MAP[0].length;
 let MAP_H = MAP.length;
+/** A rectangle of solid tiles: x0..x1, y0..y1 (tiles, end exclusive). */
+interface SolidRect {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
 const EXTRA_SCAFFOLD = new Set<number>(); // y * MAP_W + x: scaffolding that appeared while playing
 
 const RESTART_DELAY = 700; // ms between being caught and the level restarting
@@ -36,6 +45,7 @@ const SUMMON_MAX = 4; // summoned Runners alive at once
 const LISTEN_UNLOCK_KEY = 'upgrade:listen'; // localStorage: Listen Mode earned (Hard finished)
 const SUMMON_MIN_DISTANCE = 6; // tiles: when nothing off-screen is on your level, they appear at least this far
 const STOMP_NOISE = 4; // tiles
+const SCAVENGE_PATROL_RANGE = 3; // tiles: a patrolling Clicker in Mechanic 3 paces this far either side of its spot
 const HUD_UNSELECTED_ALPHA = 0.35; // HUD: the throwable the next throw won't use
 const CHECKPOINT_OFF = 0x8a8a7a;
 const CHECKPOINT_ON = 0xffa640;
@@ -144,6 +154,7 @@ export class LevelScene extends Phaser.Scene {
   private blackout!: Blackout;
   private snipers: Sniper[] = [];
   private smokeQuest: SmokeQuest | null = null;
+  private scavenge: Scavenge | null = null; // Mechanic 3: parts + workbench
   private heli: Helicopter | null = null;
   private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
   private hudSmoke: Phaser.GameObjects.Image | null = null;
@@ -206,6 +217,7 @@ export class LevelScene extends Phaser.Scene {
     this.letter = null;
     this.snipers = [];
     this.smokeQuest = null;
+    this.scavenge = null;
     this.heli = null;
     this.crates = [];
     this.hudSmoke = null;
@@ -254,8 +266,13 @@ export class LevelScene extends Phaser.Scene {
       this.quest = new MolotovQuest(this, this.controls, this.dialogue, this.progress, this.throwables, this.locks,
         (text, ms) => this.banner(text, ms));
     }
+    if (LEVEL.upgrade !== null) { // Mechanic 3: the parts and the workbench
+      this.scavenge = new Scavenge(this, this.controls, this.progress, LEVEL.upgrade, (text, ms) => this.banner(text, ms));
+      this.scavenge.onBuilt = () => { this.player.canDoubleJump = true; };
+    }
     this.spawnEntities();
     this.player.covers = this.covers;
+    this.player.canDoubleJump = LEVEL.upgrade !== null && upgradeBuilt(Upgrade.DoubleJump);
     this.player.zombies = this.zombies;
     this.throwables.zombies = this.zombies;
 
@@ -307,6 +324,11 @@ export class LevelScene extends Phaser.Scene {
       const talking = this.dialogue.open;
       this.dialogue.update();
       if (talking || this.dialogue.open) return; // thinking: the world is paused (Dialogue pauses physics)
+    }
+    if (this.scavenge) {
+      const working = this.scavenge.open;
+      this.scavenge.update(time, this.player);
+      if (working || this.scavenge.open) return; // at the bench: the world is paused (Scavenge pauses physics)
     }
     if (this.quest) {
       this.quest.update(time, this.player);
@@ -539,9 +561,18 @@ export class LevelScene extends Phaser.Scene {
         if (this.smokeQuest) this.throwables.smokes = this.smokesBeforeCheat;
         this.locks.cheatCloseDoors(this.player.body);
       }
+      if (this.scavenge) this.player.canDoubleJump = this.cheating || upgradeBuilt(Upgrade.DoubleJump); // spring boots on loan
       this.banner(this.cheating ? 'CHEATS ON' : 'CHEATS OFF', 1200);
       const unlimited = this.smokeQuest ? 'UNLIMITED BOTTLES + SMOKE' : 'UNLIMITED BOTTLES';
-      if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: ' + unlimited + '  INVISIBLE  DOORS OPEN' : '');
+      const extra = this.scavenge ? '  DOUBLE JUMP' : '';
+      if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: ' + unlimited + '  INVISIBLE  DOORS OPEN' + extra : '');
+    }
+    if (this.scavenge && this.controls.pressed(Action.Num2)) { // dev: forget built upgrades, replay from scratch
+      forgetUpgrades();
+      this.progress = new LevelProgress();
+      this.checkpoint = -1;
+      this.bottlesAtCheckpoint = 0;
+      this.restartLevel();
     }
     if (this.cheating && this.throwables.count < 9) this.throwables.count = 9;
     if (this.cheating && this.smokeQuest && this.throwables.smokes < 9) this.throwables.smokes = 9; // smoke too
@@ -629,7 +660,8 @@ export class LevelScene extends Phaser.Scene {
       'Move ←→   Sprint Shift   Crouch ↓/C (toggle)   Jump Space   Throw: hold E, aim ←→ ↑↓, release   Punch X   Read / look ↑'
       + (this.player.canListen ? '   Listen Q (hold)' : '') + (LEVEL.heli ? '   Bottle / smoke Tab' : '')
       + '   Checkpoint R   Levels Esc'
-      + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles' + (this.smokeQuest ? ' / smoke' : '') + ' + invisible + every door open' : ''), {
+      + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles' + (this.smokeQuest ? ' / smoke' : '') + ' + invisible + every door open'
+        + (this.scavenge ? ' + double jump      2: forget built upgrades (restart from scratch)' : '') : ''), {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }
@@ -661,8 +693,13 @@ export class LevelScene extends Phaser.Scene {
     ground.setScale(ART_SCALE).setDepth(0);
     grass.setScale(ART_SCALE).setDepth(11); // grass in front of the feet
 
+    // Solid bodies: each row's runs of solid tiles, and a run continues down while the rows below have
+    // the exact same run. A straight wall is then ONE body: jumping while pressed against it can't
+    // catch on the seams between stacked 1-tile bodies (Arcade resolves a fresh seam overlap on Y).
     const solids = this.physics.add.staticGroup();
+    let open: SolidRect[] = []; // rects still growing down (they reached the previous row)
     for (let y = 0; y < MAP_H; y++) {
+      const next: SolidRect[] = [];
       let x = 0;
       while (x < MAP_W) {
         if (!isSolid(x, y)) {
@@ -671,11 +708,29 @@ export class LevelScene extends Phaser.Scene {
         }
         const start = x;
         while (x < MAP_W && isSolid(x, y)) x++;
-        const w = (x - start) * TILE;
-        solids.add(this.add.zone(start * TILE + w / 2, y * TILE + TILE / 2, w, TILE));
+        let rect: SolidRect | null = null;
+        for (let i = 0; i < open.length; i++) {
+          if (open[i].x0 === start && open[i].x1 === x) {
+            rect = open[i];
+            open.splice(i, 1);
+            break;
+          }
+        }
+        if (rect) rect.y1 = y + 1; // same run as the row above: grow down
+        else rect = { x0: start, x1: x, y0: y, y1: y + 1 };
+        next.push(rect);
       }
+      for (let i = 0; i < open.length; i++) this.addSolid(solids, open[i]); // ended on the row above
+      open = next;
     }
+    for (let i = 0; i < open.length; i++) this.addSolid(solids, open[i]);
     return solids;
+  }
+
+  private addSolid(solids: Phaser.Physics.Arcade.StaticGroup, r: SolidRect): void {
+    const w = (r.x1 - r.x0) * TILE;
+    const h = (r.y1 - r.y0) * TILE;
+    solids.add(this.add.zone(r.x0 * TILE + w / 2, r.y0 * TILE + h / 2, w, h));
   }
 
   /** Auto-tile one map cell from its stone neighbours (top / middle / bottom row, left / right caps) + grass on top. */
@@ -749,9 +804,12 @@ export class LevelScene extends Phaser.Scene {
           case 'N':
             if (!this.keyAlreadyDropped(x, y)) this.zombies.push(new Zombie(this, ZombieKind.Clicker, feetX, feetY, 1, false));
             break;
-          case 'c':
-            this.zombies.push(new Zombie(this, ZombieKind.Clicker, feetX, feetY, 1, true));
+          case 'c': {
+            const z = new Zombie(this, ZombieKind.Clicker, feetX, feetY, 1, true);
+            if (this.scavenge) z.patrolRange = SCAVENGE_PATROL_RANGE; // open ground: it paces around its spot
+            this.zombies.push(z);
             break;
+          }
           case 'R':
             if (!this.keyAlreadyDropped(x, y)) this.zombies.push(new Zombie(this, ZombieKind.Runner, feetX, feetY, 1, true));
             break;
@@ -807,6 +865,15 @@ export class LevelScene extends Phaser.Scene {
           }
           case 'Y':
             if (this.smokeQuest) this.smokeQuest.addCache(feetX, feetY);
+            break;
+          case 'O':
+            if (this.scavenge) this.scavenge.addPart(Part.Spring, feetX, feetY);
+            break;
+          case 'U':
+            if (this.scavenge) this.scavenge.addPart(Part.Strap, feetX, feetY);
+            break;
+          case 'T':
+            if (this.scavenge) this.scavenge.addBench(feetX, feetY);
             break;
           case 'A':
             this.add.image(feetX, feetY + 2, 'tent').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);

@@ -831,6 +831,62 @@ def draw_helicopter_sprite():
     return c.image().crop((0, 38, 96, 84))
 
 
+def draw_spring_sprite():
+    """Mechanic 3 part: a coil spring off an old car seat, 14x20 px: open coils, lit front, dark back."""
+    c = Canvas()
+    for i in range(4):
+        y = 3 + i * 4
+        c.stroke((2, y), (11, y + 2), 1, '5')       # back half of the coil
+        c.stroke((2, y + 2), (11, y), 2, '^')       # front half, lit
+        c.put(6, y + 1, 'V')
+    c.rect(2, 18, 11, 18, '5')                      # flat ends
+    c.rect(2, 1, 11, 1, '5')
+    c.outline()
+    return c.image().crop((0, 0, 14, 20))
+
+
+def draw_strap_sprite():
+    """Mechanic 3 part: a leather strap with a brass buckle, 22x10 px."""
+    c = Canvas()
+    c.rect(1, 3, 20, 6, ']'); c.row(6, 1, 20, '>')  # leather + shade
+    c.row(3, 1, 14, '<')                            # lit edge
+    for x in (5, 8, 11):
+        c.put(x, 5, '?')                            # punched holes
+    c.rect(15, 1, 19, 8, 'k'); c.rect(16, 2, 18, 7, ']'); c.row(4, 16, 18, 'g')   # brass buckle + tongue
+    c.outline()
+    return c.image().crop((0, 0, 22, 10))
+
+
+def draw_spring_boots_sprite():
+    """The upgrade: a work boot strapped onto a spring, 18x22 px (bench panel / HUD)."""
+    c = Canvas()
+    c.rect(4, 2, 10, 10, 'O'); c.rect(4, 11, 15, 13, 'O'); c.row(14, 3, 15, 'o')    # boot
+    c.row(6, 4, 10, 'L'); c.put(9, 6, 'Y')                                          # the strap
+    for i in range(3):                              # spring under the sole
+        y = 16 + i * 2
+        c.stroke((4, y + 1), (14, y), 1, '5')
+    c.outline()
+    return c.image().crop((1, 0, 18, 22))
+
+
+def draw_workbench_sprite():
+    """Mechanic 3: the workbench where parts become upgrades: wooden top, a vise, tools, 64x40 px."""
+    c = Canvas()
+    x0, x1, top = 6, 69, 62
+    c.rect(x0, top, x1, top + 4, '<'); c.row(top + 4, x0, x1, '>')                  # top board
+    for x in (x0 + 2, x1 - 5):                                                      # legs
+        c.rect(x, top + 5, x + 3, 91, '>')
+    c.rect(x0 + 5, 82, x1 - 5, 83, '>')                                             # shelf
+    c.rect(x0 + 10, 77, x0 + 18, 81, '5'); c.rect(x0 + 24, 78, x0 + 30, 81, 'U')    # junk on the shelf
+    c.rect(x1 - 16, top - 7, x1 - 8, top - 1, '['); c.rect(x1 - 18, top - 5, x1 - 16, top - 3, '5')   # vise
+    c.stroke((x1 - 12, top - 8), (x1 - 12, top - 12), 1, '5')                       # vise handle
+    c.stroke((x0 + 8, top - 1), (x0 + 20, top - 3), 2, '5')                         # wrench
+    c.rect(x0 + 26, top - 2, x0 + 36, top - 1, 'M')                                 # a sketch on paper
+    c.put(x0 + 29, top - 2, 'm'); c.put(x0 + 32, top - 2, 'm')
+    c.outline()
+    return c.image().crop((x0 - 1, top - 13, x1 + 2, 93))
+
+
 def draw_stash_sprite():
     """Bottle stash (pickup worth several bottles): three bottles leaning together, 17x14 px."""
     c = Canvas()
@@ -889,6 +945,20 @@ def main():
     draw_big_crate_damaged(False).save(os.path.join(out_dir, 'big_crate_cracked.png'))
     draw_big_crate_damaged(True).save(os.path.join(out_dir, 'big_crate_broken.png'))
     draw_concrete_sprite().save(os.path.join(out_dir, 'concrete.png'))
+    draw_spring_sprite().save(os.path.join(out_dir, 'spring.png'))
+    draw_strap_sprite().save(os.path.join(out_dir, 'strap.png'))
+    draw_spring_boots_sprite().save(os.path.join(out_dir, 'spring_boots.png'))
+    draw_workbench_sprite().save(os.path.join(out_dir, 'workbench.png'))
+    if preview_dir:
+        items = [draw_workbench_sprite(), draw_spring_sprite(), draw_strap_sprite(), draw_spring_boots_sprite()]
+        pw = sum(i.width for i in items) + 10 * len(items)
+        ph = max(i.height for i in items)
+        prev = Image.new('RGBA', (pw, ph), (90, 96, 110, 255))
+        x = 0
+        for i in items:
+            prev.alpha_composite(i, (x, ph - i.height))
+            x += i.width + 10
+        prev.resize((pw * 5, ph * 5), Image.NEAREST).save(os.path.join(preview_dir, 'm3_props_preview.png'))
     draw_ammo_crate_sprite(False).save(os.path.join(out_dir, 'ammo_crate.png'))
     draw_ammo_crate_sprite(True).save(os.path.join(out_dir, 'ammo_crate_open.png'))
     draw_smoke_grenade_sprite().save(os.path.join(out_dir, 'smoke_grenade.png'))
