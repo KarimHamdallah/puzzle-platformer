@@ -112,6 +112,8 @@ export class MenuScene extends Phaser.Scene {
   private parallax: Phaser.GameObjects.TileSprite[] = [];
   private notice!: Phaser.GameObjects.Text;
   private leaving = false;
+  private moreUp!: Phaser.GameObjects.Text; // shown when part of the list is hidden above / below
+  private moreDown!: Phaser.GameObjects.Text;
 
   constructor() {
     super('Menu');
@@ -158,9 +160,19 @@ export class MenuScene extends Phaser.Scene {
 
     this.notice = this.add.text(w - 40, 48, '', { ...TEXT_STYLE, fontSize: '26px', fontStyle: 'bold', stroke: '#000000', strokeThickness: 5 })
       .setOrigin(1, 0.5).setAlpha(0).setScrollFactor(0).setDepth(11);
-    this.add.text(w / 2, h - 16, '← ↑ ↓ →  choose      Space / Enter  play      Esc in a level  back here      mouse works too', {
+    this.add.text(w / 2, h - 16, '← ↑ ↓ →  choose      Space / Enter  play      Esc in a level  back here      mouse + wheel work too', {
       ...TEXT_STYLE, fontSize: '22px', stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(11);
+
+    // ▲ / ▼: more of the list above or below. The mouse wheel scrolls it too.
+    const arrowStyle = { ...TEXT_STYLE, fontSize: '30px', color: '#ffd24a', stroke: '#000000', strokeThickness: 5 };
+    this.moreUp = this.add.text(w - 60, TOP_BAND + 24, '▲ more', arrowStyle).setOrigin(1, 0.5).setScrollFactor(0).setDepth(11);
+    this.moreDown = this.add.text(w - 60, h - BOTTOM_BAND - 24, '▼ more', arrowStyle).setOrigin(1, 0.5).setScrollFactor(0).setDepth(11);
+    this.input.on('wheel', (_p: Phaser.Input.Pointer, _over: unknown, _dx: number, dy: number) => {
+      const cam = this.cameras.main;
+      this.tweens.killTweensOf(cam);
+      cam.scrollY = Phaser.Math.Clamp(cam.scrollY + dy, 0, this.maxScroll());
+    });
 
     this.controls = new InputActions();
     this.select(this.section, this.col);
@@ -171,6 +183,9 @@ export class MenuScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     for (let i = 0; i < this.parallax.length; i++) this.parallax[i].tilePositionX += deltaMs * 0.004 * (i + 1); // slow drift
+    const scrollY = this.cameras.main.scrollY;
+    this.moreUp.setVisible(scrollY > 1);
+    this.moreDown.setVisible(scrollY < this.maxScroll() - 1);
     if (this.leaving) return;
     this.controls.update();
     const c = this.controls;
@@ -220,7 +235,7 @@ export class MenuScene extends Phaser.Scene {
     if (locked) container.setAlpha(0.7);
 
     container.setSize(CARD_W, CARD_H).setInteractive({ useHandCursor: true });
-    container.on('pointerover', () => this.select(section, col));
+    container.on('pointerover', () => this.select(section, col, false)); // the mouse is already there: no slide
     container.on('pointerdown', () => {
       this.select(section, col);
       this.play(entry);
@@ -275,7 +290,8 @@ export class MenuScene extends Phaser.Scene {
     return SECTIONS[this.section].levels[this.col];
   }
 
-  private select(section: number, col: number): void {
+  /** keepVisible: slide the list so the chosen section is fully on screen (keys yes, mouse hover no). */
+  private select(section: number, col: number, keepVisible = true): void {
     section = Phaser.Math.Clamp(section, 0, SECTIONS.length - 1);
     col = Phaser.Math.Clamp(col, 0, SECTIONS[section].levels.length - 1);
     this.section = section;
@@ -291,6 +307,7 @@ export class MenuScene extends Phaser.Scene {
       this.tweens.killTweensOf(card.container);
       this.tweens.add({ targets: card.container, scale: on ? 1.04 : 1, duration: 120, ease: 'Quad.easeOut' });
     }
+    if (!keepVisible) return;
     // Keep the chosen section on screen: slide the list just enough.
     const cam = this.cameras.main;
     const target = this.scrollFor(section, cam.scrollY);
@@ -308,8 +325,12 @@ export class MenuScene extends Phaser.Scene {
     let scroll = current;
     if (bottom - scroll > h - BOTTOM_BAND) scroll = bottom - (h - BOTTOM_BAND);
     if (top - scroll < TOP_BAND) scroll = top - TOP_BAND;
-    const maxScroll = Math.max(0, sectionY(SECTIONS.length - 1) + 72 + CARD_H + 16 - (h - BOTTOM_BAND));
-    return Phaser.Math.Clamp(scroll, 0, maxScroll);
+    return Phaser.Math.Clamp(scroll, 0, this.maxScroll());
+  }
+
+  /** How far the list can scroll: the last section's cards just above the key help strip. */
+  private maxScroll(): number {
+    return Math.max(0, sectionY(SECTIONS.length - 1) + 72 + CARD_H + 16 - (this.scale.height - BOTTOM_BAND));
   }
 
   private play(entry: LevelEntry): void {
