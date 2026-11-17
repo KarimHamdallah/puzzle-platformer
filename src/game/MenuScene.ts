@@ -38,6 +38,8 @@ const THUMB_M2_HARD = 'thumb_m2_hard';
 const THUMB_M2_HARD_PATH = 'assets/thumbs/mechanic2_hard.png';
 const THUMB_M3_EASY = 'thumb_m3_easy';
 const THUMB_M3_EASY_PATH = 'assets/thumbs/mechanic3_easy.jpg';
+const THUMB_M3_MEDIUM = 'thumb_m3_medium';
+const THUMB_M3_MEDIUM_PATH = 'assets/thumbs/mechanic3_medium.jpg';
 
 const SECTIONS: MenuSection[] = [
   {
@@ -70,7 +72,7 @@ const SECTIONS: MenuSection[] = [
     subheading: 'Search the ruins for parts, build upgrades at the workbench, reach what you could not before.',
     levels: [
       { scene: 'Level', level: 6, label: 'EASY', title: 'Spring Boots', blurb: 'A cliff too high. Find the parts, build the boots.', thumb: THUMB_M3_EASY },
-      { scene: 'Level', level: 7, label: 'MEDIUM', title: 'The Sea', blurb: 'One gas canister: dash the islands, or breathe below.', thumb: '' },
+      { scene: 'Level', level: 7, label: 'MEDIUM', title: 'The Sea', blurb: 'One gas canister: dash the islands, or breathe below.', thumb: THUMB_M3_MEDIUM },
       { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Everything you built, together.', thumb: '' },
     ],
   },
@@ -130,6 +132,7 @@ export class MenuScene extends Phaser.Scene {
     this.load.image(THUMB_M2_MEDIUM, THUMB_M2_MEDIUM_PATH);
     this.load.image(THUMB_M2_HARD, THUMB_M2_HARD_PATH);
     this.load.image(THUMB_M3_EASY, THUMB_M3_EASY_PATH);
+    this.load.image(THUMB_M3_MEDIUM, THUMB_M3_MEDIUM_PATH);
   }
 
   create(): void {

@@ -16,7 +16,7 @@ import { Player } from './Player';
 import { SmokeQuest } from './Smoke';
 import { Sniper } from './Sniper';
 import { Throwables } from './Throwing';
-import { Part, Scavenge, SKILL_HINTS, Upgrade } from './Upgrades';
+import { Part, PILL_TIME, Scavenge, SKILL_HINTS, Upgrade } from './Upgrades';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 
 // ---------------------------------------------------------------- the current level
@@ -164,6 +164,7 @@ export class LevelScene extends Phaser.Scene {
   private smokeQuest: SmokeQuest | null = null;
   private scavenge: Scavenge | null = null; // Mechanic 3: parts + workbench
   private breathesUnderwater = false; // Mechanic 3: breath pills (without them, water drowns you at once)
+  private pillsLeft = 0; // s of breath left from the last pill (taken when built, and again after a death)
   private skillsText: Phaser.GameObjects.Text | null = null; // HUD: the upgrades you have, and their keys
   private heli: Helicopter | null = null;
   private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
@@ -229,6 +230,7 @@ export class LevelScene extends Phaser.Scene {
     this.smokeQuest = null;
     this.scavenge = null;
     this.breathesUnderwater = false;
+    this.pillsLeft = 0;
     this.skillsText = null;
     this.heli = null;
     this.crates = [];
@@ -280,7 +282,11 @@ export class LevelScene extends Phaser.Scene {
     }
     if (LEVEL.upgrades.length > 0) { // Mechanic 3: the parts and the workbench
       this.scavenge = new Scavenge(this, this.controls, this.progress, LEVEL.upgrades, (text, ms) => this.banner(text, ms));
-      this.scavenge.onBuilt = () => this.applyUpgrades();
+      this.scavenge.onBuilt = (u) => {
+        if (u === Upgrade.Pills) this.pillsLeft = PILL_TIME; // swallowed now: the clock is running
+        this.applyUpgrades();
+      };
+      if (this.progress.built[Upgrade.Pills]) this.pillsLeft = PILL_TIME; // after a death: another pill
     }
     this.spawnEntities();
     this.player.covers = this.covers;
@@ -420,6 +426,12 @@ export class LevelScene extends Phaser.Scene {
     if (!this.player.dead) {
       this.updateCheckpoints();
       this.stompsAndContacts();
+      if (this.pillsLeft > 0) { // the pill wears off
+        const shown = Math.ceil(this.pillsLeft);
+        this.pillsLeft = Math.max(0, this.pillsLeft - dt);
+        if (Math.ceil(this.pillsLeft) !== shown) this.applyUpgrades(); // the HUD's seconds, and at 0 no more breath
+        if (this.pillsLeft === 0) this.banner('THE PILLS WORE OFF', 1500);
+      }
       const b = this.player.body; // in the water up to the chest, without the pills: he drowns at once
       if (!this.breathesUnderwater && isWater(Math.floor(b.center.x / TILE), Math.floor(b.center.y / TILE))) this.player.kill();
     }
@@ -604,10 +616,17 @@ export class LevelScene extends Phaser.Scene {
     const m3 = this.scavenge !== null;
     p.canDoubleJump = m3 && this.hasUpgrade(Upgrade.DoubleJump);
     p.canDash = m3 && this.hasUpgrade(Upgrade.Dash);
-    this.breathesUnderwater = m3 && this.hasUpgrade(Upgrade.Pills);
+    this.breathesUnderwater = m3 && (this.cheating || (this.hasUpgrade(Upgrade.Pills) && this.pillsLeft > 0));
     if (this.skillsText) { // what you can do now, and the key
       const lines: string[] = [];
-      for (let u = 0; u < Upgrade.Count; u++) if (m3 && this.hasUpgrade(u)) lines.push(SKILL_HINTS[u]);
+      for (let u = 0; u < Upgrade.Count; u++) {
+        if (!m3 || !this.hasUpgrade(u)) continue;
+        if (u === Upgrade.Pills && !this.cheating) { // only while it lasts, with the seconds left
+          if (this.pillsLeft > 0) lines.push(SKILL_HINTS[u] + ':  ' + Math.ceil(this.pillsLeft) + ' s');
+          continue;
+        }
+        lines.push(SKILL_HINTS[u]);
+      }
       this.skillsText.setText(lines.join('\n'));
     }
   }

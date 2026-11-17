@@ -40,6 +40,8 @@ interface Recipe {
   needs: number[]; // parts needed, indexed by Part
 }
 
+export const PILL_TIME = 16; // s of breath from one pill: the sea floor takes ~11 s sprinting, ~14 s walking
+
 const PART_NAMES = ['Spring', 'Leather strap', 'Steel wire', 'Medicinal herbs', 'Gas canister']; // indexed by Part
 const PART_TEXTURES = ['spring', 'strap', 'wire', 'herb', 'gas'];
 
@@ -58,7 +60,7 @@ const RECIPES: Recipe[] = [ // indexed by Upgrade
   },
   {
     name: 'BREATH PILLS',
-    what: 'Breathe under water: walk across the sea floor.',
+    what: 'Breathe under water for ' + PILL_TIME + ' seconds from the moment you take them. Run the sea floor.',
     icon: 'pills',
     needs: [0, 0, 0, 2, 1],
   },
