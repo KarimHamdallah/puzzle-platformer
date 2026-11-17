@@ -1,11 +1,13 @@
-import Phaser from 'phaser';
 import type GUI from 'lil-gui';
-import { DEBUG_ENABLED, TuningFolder, debug } from '../core/Debug';
-import { Action, type InputActions } from '../core/InputActions';
-import { ART_SCALE, TILE } from './constants';
-import { NoiseKind, type NoiseSystem } from './Noise';
-import { THROW, launchVelocity, type Throwables } from './Throwing';
-import type { Zombie } from './Zombie';
+import {
+  BodyType, DEBUG_ENABLED, Ease, MathUtil, Rect, TuningFolder, Vec2, debugPanel,
+  type Animator, type Body, type Engine, type Group, type Input, type Sprite,
+} from '../../engine';
+import { Action, MoveX } from '../Actions';
+import { ART_SCALE, TILE } from '../constants';
+import { NoiseKind, type NoiseSystem } from '../systems/Noise';
+import { LaunchVelocity, THROW, type Throwables } from '../systems/Throwing';
+import { MeleeResult, type Zombie } from './Zombie';
 
 /**
  * Every movement number, in TILES and SECONDS (never pixels).
@@ -70,7 +72,7 @@ const THROW_RELEASE = 0.08; // s into the throw when the bottle leaves the hand 
 const ATTACK_TIME = 0.2; // s a punch locks movement (short: several fit in a Runner's dizzy window)
 const ATTACK_HIT = 0.06; // s into the punch when the fist lands
 const HIDDEN_TINT = 0x6a6a6a;
-const OVERLAP_INSET = 0.5; // px: the static tree counts touching edges as overlap, so test a slightly smaller box
+const OVERLAP_INSET = 0.5; // px: test a slightly smaller box, so a box that only touches a wall reads as clear
 
 enum PlayerState {
   Idle,
@@ -86,28 +88,25 @@ enum PlayerState {
   Dead,
 }
 
-function gravity(): number {
-  return (2 * T.jumpHeight * TILE) / (T.timeToApex * T.timeToApex); // px/s²
+/** g = 2h / t²  (px/s²): the gravity that makes a jump of jumpHeight peak after timeToApex. */
+function Gravity(): number {
+  return (2 * T.jumpHeight * TILE) / (T.timeToApex * T.timeToApex);
 }
 
-function jumpSpeed(): number {
-  return (2 * T.jumpHeight * TILE) / T.timeToApex; // px/s
+/** v = 2h / t  (px/s): the launch speed of that jump. */
+function JumpSpeed(): number {
+  return (2 * T.jumpHeight * TILE) / T.timeToApex;
 }
 
 /** Launch speed for the double jump: v² = 2·g·h, with the same gravity as the first jump. */
-function doubleJumpSpeed(): number {
-  return Math.sqrt(2 * gravity() * T.doubleJumpHeight * TILE); // px/s
-}
-
-function moveTowards(current: number, target: number, maxDelta: number): number {
-  if (Math.abs(target - current) <= maxDelta) return target;
-  return current + Math.sign(target - current) * maxDelta;
+function DoubleJumpSpeed(): number {
+  return Math.sqrt(2 * Gravity() * T.doubleJumpHeight * TILE);
 }
 
 export class Player {
-  readonly body: Phaser.Physics.Arcade.Body;
+  readonly body: Body;
   /** Visual root, placed at the FEET so squash & stretch pivots on the ground. */
-  readonly view: Phaser.GameObjects.Container;
+  readonly view: Group;
   readonly throwables: Throwables;
 
   state = PlayerState.Idle;
@@ -117,12 +116,12 @@ export class Player {
   crouchWanted = false; // crouch is a TOGGLE: one press of Down / S / C
   hidden = false; // crouched behind cover: sighted enemies cannot see him
   canListen = false; // Listen Mode unlocked (Hard level, then every level once Hard is finished)
-  listening = false; // holding Listen: frozen, crouched, silent (the scene draws what he hears)
+  listening = false; // holding Listen: frozen, crouched, silent (the level draws what he hears)
   listenEnergy = 1; // 0..1: drains while listening, recharges otherwise
   invisible = false; // cheat: nothing can see, sense or catch him
-  canDoubleJump = false; // Mechanic 3: spring boots built (the scene sets it)
+  canDoubleJump = false; // Mechanic 3: spring boots built (the level sets it)
   private airJumpUsed = false; // the double jump is spent until he lands
-  canDash = false; // Mechanic 3: X in the air dashes (the scene sets it)
+  canDash = false; // Mechanic 3: X in the air dashes (the level sets it)
   private dashUsed = false; // one dash per time in the air
   private dashTimer = 0; // s left in the current dash
   pinned = false; // a machine gun is on him: frozen in place, flinching, until it kills him
@@ -131,18 +130,18 @@ export class Player {
   landCount = 0; // loud landings so far
   dead = false;
   facing = 1;
-  /** Cover areas (crates) and the infected, for hiding and melee; the scene fills these. */
-  covers: Phaser.Geom.Rectangle[] = [];
+  /** Cover areas (crates) and the infected, for hiding and melee; the level fills these. */
+  covers: Rect[] = [];
   zombies: Zombie[] = [];
 
-  private readonly scene: Phaser.Scene;
-  private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
-  private readonly input: InputActions;
+  private readonly engine: Engine;
+  private readonly input: Input;
   private readonly noise: NoiseSystem;
   private readonly spawnX: number;
   private readonly spawnY: number;
-  private readonly sprite: Phaser.GameObjects.Sprite;
-  private readonly ghost: Phaser.GameObjects.Image;
+  private readonly sprite: Sprite;
+  private readonly anim: Animator;
+  private readonly ghost: Sprite;
   private aiming = false;
   private aimDistance = 0; // tiles, signed: where the bottle will land
   private aimArc = 0; // tiles above the hand
@@ -159,78 +158,80 @@ export class Player {
   private airborneVy = 0; // last vertical speed in the air = landing impact
   private debugView: PlayerDebug | null = null;
 
-  constructor(scene: Phaser.Scene, input: InputActions, noise: NoiseSystem, throwables: Throwables,
-    spawnFeetX: number, spawnFeetY: number) {
-    this.scene = scene;
-    this.physics = scene.physics;
-    this.input = input;
+  constructor(engine: Engine, noise: NoiseSystem, throwables: Throwables, spawnFeetX: number, spawnFeetY: number) {
+    this.engine = engine;
+    this.input = engine.input;
     this.noise = noise;
     this.throwables = throwables;
     this.spawnX = spawnFeetX;
     this.spawnY = spawnFeetY;
 
-    // Physics: a bare Arcade body (no sprite). Gravity is ours, not Arcade's.
-    this.body = scene.physics.add.body(spawnFeetX - PLAYER_W / 2, spawnFeetY - PLAYER_H, PLAYER_W, PLAYER_H);
-    this.body.setAllowGravity(false);
+    // Physics: a bare body (no sprite). gravityScale 0: the player applies his own, variable gravity.
+    this.body = engine.physics.CreateBody({
+      type: BodyType.Dynamic, x: spawnFeetX - PLAYER_W / 2, y: spawnFeetY - PLAYER_H, w: PLAYER_W, h: PLAYER_H, gravityScale: 0,
+    });
 
+    const r = engine.renderer;
     // Takeoff ghost: a black silhouette of the exact takeoff frame, left where the last jump started.
-    this.ghost = scene.add.image(0, 0, 'player_idle', 0).setOrigin(0.5, 1).setScale(ART_SCALE);
-    this.ghost.setTintFill(0x000000).setVisible(false).setDepth(9);
+    this.ghost = r.CreateSprite(0, 0, 'player_idle').SetOrigin(0.5, 1).SetScale(ART_SCALE);
+    this.ghost.SetTintFill(0x000000).SetVisible(false).SetDepth(9);
 
-    // The survivor sprite sits inside a container at the feet (squash & stretch pivots there).
-    this.sprite = scene.add.sprite(0, 0, 'player_idle', 0).setOrigin(0.5, 1).setScale(ART_SCALE);
-    this.sprite.play('player_idle');
-    this.view = scene.add.container(spawnFeetX, spawnFeetY, [this.sprite]).setDepth(10);
+    // The survivor sprite sits inside a group at the feet (squash & stretch pivots there).
+    this.sprite = r.CreateSprite(0, 0, 'player_idle').SetOrigin(0.5, 1).SetScale(ART_SCALE);
+    this.anim = engine.animations.Create(this.sprite);
+    this.anim.Play('player_idle');
+    this.view = r.CreateGroup(spawnFeetX, spawnFeetY).SetDepth(10).Add(this.sprite);
 
-    if (DEBUG_ENABLED) this.debugView = new PlayerDebug(scene, this);
+    if (DEBUG_ENABLED) this.debugView = new PlayerDebug(engine, this);
   }
 
-  destroy(): void {
-    if (this.debugView) this.debugView.destroy();
+  Destroy(): void {
+    if (this.debugView) this.debugView.Destroy();
   }
 
   get feetX(): number {
-    return this.body.center.x;
+    return this.body.centerX;
   }
 
   get feetY(): number {
     return this.body.bottom;
   }
 
-  respawn(): void {
-    this.setCrouched(false);
-    this.body.reset(this.spawnX - PLAYER_W / 2, this.spawnY - PLAYER_H);
+  Respawn(): void {
+    this.SetCrouched(false);
+    this.body.Teleport(this.spawnX - PLAYER_W / 2, this.spawnY - PLAYER_H);
     this.grounded = false;
     this.jumping = false;
     this.aiming = false;
     this.dead = false;
     this.lastGroundedAt = -Infinity;
-    this.ghost.setVisible(false);
+    this.ghost.SetVisible(false);
   }
 
-  /** Caught by an infected. The scene restarts the level shortly after. */
-  kill(): void {
+  /** Caught by an infected. The level restarts shortly after. */
+  Kill(): void {
     if (this.dead) return;
     this.dead = true;
     this.aiming = false;
-    this.throwables.clearAim();
-    this.body.setVelocity(0, 0);
+    this.throwables.ClearAim();
+    this.body.SetVelocity(0, 0);
   }
 
-  /** Gameplay. Called by the scene on every physics step (60 Hz), after collisions are resolved. */
-  fixedUpdate(dt: number): void {
+  /** Gameplay. Called by the level on every fixed step (60 Hz), before the physics step moves the body. */
+  FixedUpdate(dt: number): void {
     const b = this.body;
+    const input = this.input;
     this.simTime += dt;
     if (this.dead) {
-      b.setVelocity(0, 0);
+      b.SetVelocity(0, 0);
       this.state = PlayerState.Dead;
       return;
     }
 
     // Ground check. Ignored while moving up: right after a jump the contact flag can be one step stale.
-    const onGround = (b.blocked.down || b.touching.down) && b.velocity.y >= 0;
+    const onGround = b.contacts.down && b.velocity.y >= 0;
     if (onGround) {
-      if (!this.grounded) this.land();
+      if (!this.grounded) this.Land();
       this.lastGroundedAt = this.simTime;
       this.jumping = false;
       this.airJumpUsed = false;
@@ -243,13 +244,13 @@ export class Player {
     // Crouch toggle: a Down press on the ground flips it (presses in the air / while aiming are eaten,
     // so a fast-fall or an arc adjustment never toggles crouch on landing). Sprinting, jumping,
     // falling and aiming stand you up; standing needs head room.
-    if (this.input.buffered(Action.Down, 150)) {
-      this.input.consume(Action.Down);
+    if (input.Buffered(Action.Down, 150)) {
+      input.Consume(Action.Down);
       if (onGround && !this.aiming) this.crouchWanted = !this.crouchWanted;
     }
-    if (!onGround || this.input.held(Action.Sprint) || this.input.held(Action.Throw)) this.crouchWanted = false;
+    if (!onGround || input.Held(Action.Sprint) || input.Held(Action.Throw)) this.crouchWanted = false;
     // Listen Mode: hold on the ground to freeze in a crouch (still hidden behind cover, silent).
-    this.listening = this.canListen && onGround && this.input.held(Action.Listen) && !this.aiming
+    this.listening = this.canListen && onGround && input.Held(Action.Listen) && !this.aiming
       && this.throwTimer <= 0 && this.attackTimer <= 0 && !this.listenExhausted;
     if (this.listening) {
       this.listenEnergy -= dt / T.listenTime;
@@ -263,18 +264,18 @@ export class Player {
       if (this.listenEnergy >= 1) this.listenExhausted = false;
     }
     const crouchNow = this.crouchWanted || this.listening;
-    if (crouchNow && !this.crouched) this.setCrouched(true);
-    else if (!crouchNow && this.crouched && this.canStand()) this.setCrouched(false);
+    if (crouchNow && !this.crouched) this.SetCrouched(true);
+    else if (!crouchNow && this.crouched && this.CanStand()) this.SetCrouched(false);
 
-    this.updateThrow(dt, onGround);
-    this.updateAttack(dt, onGround);
+    this.UpdateThrow(dt, onGround);
+    this.UpdateAttack(dt, onGround);
 
     // Horizontal: gait speed, then accel / decel / turn toward it.
     let gaitSpeed = T.walkSpeed;
     if (this.crouched) gaitSpeed = T.sneakSpeed;
-    else if (this.input.held(Action.Sprint)) gaitSpeed = T.sprintSpeed;
+    else if (input.Held(Action.Sprint)) gaitSpeed = T.sprintSpeed;
     const locked = this.aiming || this.throwTimer > 0 || this.attackTimer > 0 || this.listening || this.pinned;
-    const target = locked ? 0 : this.input.moveX * gaitSpeed * TILE;
+    const target = locked ? 0 : MoveX(input) * gaitSpeed * TILE;
     let vx = b.velocity.x;
     let time: number;
     if (target !== 0) {
@@ -285,36 +286,36 @@ export class Player {
       time = onGround ? T.decelTime : T.airDecelTime;
     }
     const rate = (T.sprintSpeed * TILE) / Math.max(time, 0.0001); // same responsiveness in every gait
-    vx = time <= 0 ? target : moveTowards(vx, target, rate * dt);
+    vx = time <= 0 ? target : MathUtil.MoveTowards(vx, target, rate * dt);
 
     // Jump: buffered press + coyote time. Jumping from a crouch stands up first (if there is room).
-    const g = gravity();
+    const g = Gravity();
     let vy = b.velocity.y;
     const canJump = !locked && !this.jumping && this.simTime - this.lastGroundedAt <= T.coyoteMs / 1000;
-    if (canJump && this.input.buffered(Action.Jump, T.jumpBufferMs) && (!this.crouched || this.canStand())) {
-      this.input.consume(Action.Jump);
-      this.setCrouched(false);
+    if (canJump && input.Buffered(Action.Jump, T.jumpBufferMs) && (!this.crouched || this.CanStand())) {
+      input.Consume(Action.Jump);
+      this.SetCrouched(false);
       this.crouchWanted = false;
       // +half a gravity step: gravity is applied below in this same step, and the fixed-step
       // integrator would otherwise lose ~jumpHeight*dt/timeToApex (≈0.15 tiles) on every jump.
-      vy = -(jumpSpeed() + 0.5 * g * dt);
-      this.jump();
-    } else if (this.canDoubleJump && !this.airJumpUsed && !onGround && !locked && this.input.buffered(Action.Jump, T.jumpBufferMs)) {
+      vy = -(JumpSpeed() + 0.5 * g * dt);
+      this.Jump();
+    } else if (this.canDoubleJump && !this.airJumpUsed && !onGround && !locked && input.Buffered(Action.Jump, T.jumpBufferMs)) {
       // Spring boots: one more jump in the air. It replaces the fall speed (a fresh launch, not a boost).
-      this.input.consume(Action.Jump);
+      input.Consume(Action.Jump);
       this.airJumpUsed = true;
-      vy = -(doubleJumpSpeed() + 0.5 * g * dt);
-      this.jump();
+      vy = -(DoubleJumpSpeed() + 0.5 * g * dt);
+      this.Jump();
     }
 
     // Dash: X in the air, once until he lands. A straight burst the way he faces: fixed speed, no gravity.
-    if (this.canDash && !onGround && !this.dashUsed && !locked && this.input.buffered(Action.Attack, T.jumpBufferMs)) {
-      this.input.consume(Action.Attack);
+    if (this.canDash && !onGround && !this.dashUsed && !locked && input.Buffered(Action.Attack, T.jumpBufferMs)) {
+      input.Consume(Action.Attack);
       this.dashUsed = true;
       this.dashTimer = T.dashTime;
-      this.pulseScale(1 + T.squash, 1 - T.squash, 140); // stretched by the burst
+      this.PulseScale(1 + T.squash, 1 - T.squash, 0.14); // stretched by the burst
     }
-    const fastFalling = vy > 0 && this.input.held(Action.Down);
+    const fastFalling = vy > 0 && input.Held(Action.Down);
     if (this.dashTimer > 0) {
       this.dashTimer -= dt;
       // the burst; on its last step back to a sprint, so a dash is always the same extra distance
@@ -322,7 +323,7 @@ export class Player {
       vy = 0;
     } else {
       // Gravity with modifiers.
-      const jumpHeld = this.input.held(Action.Jump);
+      const jumpHeld = input.Held(Action.Jump);
       let mult = 1;
       if (vy > 0) mult = T.fallGravityMult;
       else if (vy < 0 && this.jumping && !jumpHeld) mult = T.jumpCutGravityMult;
@@ -333,24 +334,24 @@ export class Player {
       vy = Math.min(vy, (fastFalling ? T.fastFallSpeed : T.maxFallSpeed) * TILE);
     }
 
-    // Forgiveness: look one step ahead and fix "missed by a few pixels" before Arcade collides.
-    if (vy < 0) this.correctCorner(vy * dt);
-    else if (!onGround && vx !== 0) this.correctLedge(vx * dt);
+    // Forgiveness: look one step ahead and fix "missed by a few pixels" before the physics step collides.
+    if (vy < 0) this.CorrectCorner(vy * dt);
+    else if (!onGround && vx !== 0) this.CorrectLedge(vx * dt);
 
-    b.setVelocity(vx, vy);
+    b.SetVelocity(vx, vy);
 
-    this.footsteps(dt, onGround, Math.abs(vx));
-    this.hidden = this.invisible || (this.crouched && this.behindCover());
-    this.state = this.computeState(Math.abs(vx));
+    this.Footsteps(dt, onGround, Math.abs(vx));
+    this.hidden = this.invisible || (this.crouched && this.BehindCover());
+    this.state = this.ComputeState(Math.abs(vx));
 
-    if (this.debugView) this.debugView.onStep();
+    if (this.debugView) this.debugView.OnStep();
   }
 
-  /** Visuals. Called by the scene once per rendered frame. */
-  update(deltaMs: number): void {
-    this.view.setPosition(this.feetX, this.feetY);
-    this.sprite.setFlipX(this.facing < 0);
-    this.landTimer = Math.max(0, this.landTimer - deltaMs / 1000);
+  /** Visuals. Called by the level once per rendered frame. */
+  Update(dt: number): void {
+    this.view.SetPosition(this.feetX, this.feetY);
+    this.sprite.SetFlipX(this.facing < 0);
+    this.landTimer = Math.max(0, this.landTimer - dt);
 
     const speed = Math.abs(this.body.velocity.x);
     let anim = 'player_idle';
@@ -370,46 +371,48 @@ export class Player {
     }
     if (this.landTimer > 0 && this.state <= PlayerState.Walk) anim = 'player_land';
     if (this.restartThrowAnim) {
-      this.sprite.play('player_throw'); // restart even if the previous throw is still the current anim
+      this.anim.Play('player_throw'); // restart even if the previous throw is still the current clip
       this.restartThrowAnim = false;
     } else if (this.restartAttackAnim) {
-      this.sprite.play('player_attack');
+      this.anim.Play('player_attack');
       this.restartAttackAnim = false;
     } else {
-      this.sprite.play(anim, true); // true = keep playing if it is already the current animation
+      this.anim.Play(anim, true); // true = keep playing if it is already the current clip
     }
     // Leg speed follows ground speed, so feet don't slide while accelerating.
-    this.sprite.anims.timeScale = gait > 0 ? Phaser.Math.Clamp(speed / (gait * TILE), 0.5, 1.5) : 1;
+    this.anim.timeScale = gait > 0 ? MathUtil.Clamp(speed / (gait * TILE), 0.5, 1.5) : 1;
 
-    if (this.pinned && !this.dead) this.sprite.setTint((Math.floor(this.simTime * 20) % 2) === 0 ? 0xffffff : 0xff6a5a); // hit, hit, hit
-    else if (this.dead) this.sprite.setTint(0xff6060);
-    else if (this.hidden) this.sprite.setTint(HIDDEN_TINT);
-    else this.sprite.clearTint();
-    this.sprite.setAlpha(this.invisible ? 0.45 : 1);
+    if (this.pinned && !this.dead) this.sprite.SetTint((Math.floor(this.simTime * 20) % 2) === 0 ? 0xffffff : 0xff6a5a); // hit, hit, hit
+    else if (this.dead) this.sprite.SetTint(0xff6060);
+    else if (this.hidden) this.sprite.SetTint(HIDDEN_TINT);
+    else this.sprite.ClearTint();
+    this.sprite.SetAlpha(this.invisible ? 0.45 : 1);
 
-    if (this.aiming) this.throwables.drawAim(this.handX(), this.handY(), launchVelocity(this.aimDistance, this.aimArc));
-    else this.throwables.clearAim();
+    if (this.aiming) this.throwables.DrawAim(this.HandX(), this.HandY(), LaunchVelocity(this.aimDistance, this.aimArc));
+    else this.throwables.ClearAim();
+    if (this.debugView) this.debugView.Draw();
   }
 
   // ---------------------------------------------------------------- throw
 
   /** Hold Throw to aim (left / right = distance, up / down = arc height), release to throw. */
-  private updateThrow(dt: number, onGround: boolean): void {
+  private UpdateThrow(dt: number, onGround: boolean): void {
+    const input = this.input;
     if (this.throwTimer > 0) {
       this.throwTimer -= dt;
       if (this.throwPending && this.throwTimer <= THROW_TIME - THROW_RELEASE) {
         this.throwPending = false;
-        this.throwables.throwBottle(this.handX(), this.handY(), launchVelocity(this.aimDistance, this.aimArc));
+        this.throwables.ThrowBottle(this.HandX(), this.HandY(), LaunchVelocity(this.aimDistance, this.aimArc));
       }
       return;
     }
 
-    const throwHeld = this.input.held(Action.Throw);
+    const throwHeld = input.Held(Action.Throw);
     if (!this.aiming) {
       // A fresh press (not consumed) starts aiming: holding the key after a throw does not re-aim.
-      if (throwHeld && this.input.buffered(Action.Throw, 200) && onGround && !this.crouched && this.attackTimer <= 0
+      if (throwHeld && input.Buffered(Action.Throw, 200) && onGround && !this.crouched && this.attackTimer <= 0
         && this.throwables.canThrow) {
-        this.input.consume(Action.Throw);
+        input.Consume(Action.Throw);
         this.aiming = true;
         this.aimDistance = THROW.startDistance * this.facing;
         this.aimArc = THROW.startArc;
@@ -421,11 +424,11 @@ export class Player {
       this.aiming = false; // knocked off a ledge while aiming: cancel
       return;
     }
-    this.aimDistance = Phaser.Math.Clamp(this.aimDistance + this.input.moveX * THROW.aimSpeed * dt, -THROW.maxDistance, THROW.maxDistance);
+    this.aimDistance = MathUtil.Clamp(this.aimDistance + MoveX(input) * THROW.aimSpeed * dt, -THROW.maxDistance, THROW.maxDistance);
     let arcInput = 0;
-    if (this.input.held(Action.Up)) arcInput += 1;
-    if (this.input.held(Action.Down)) arcInput -= 1;
-    this.aimArc = Phaser.Math.Clamp(this.aimArc + arcInput * THROW.arcSpeed * dt, THROW.minArc, THROW.maxArc);
+    if (input.Held(Action.Up)) arcInput += 1;
+    if (input.Held(Action.Down)) arcInput -= 1;
+    this.aimArc = MathUtil.Clamp(this.aimArc + arcInput * THROW.arcSpeed * dt, THROW.minArc, THROW.maxArc);
     if (this.aimDistance !== 0) this.facing = Math.sign(this.aimDistance);
 
     if (!throwHeld) {
@@ -436,42 +439,41 @@ export class Player {
     }
   }
 
-  /** Jumped on a Runner's head: bounce up like a stomp in Mario (the scene detects the stomp). */
-  bounce(): void {
-    const g = gravity();
-    this.body.setVelocityY(-Math.sqrt(2 * g * T.stompBounce * TILE));
+  /** Jumped on a Runner's head: bounce up like a stomp in Mario (the level detects the stomp). */
+  Bounce(): void {
+    this.body.velocity.y = -Math.sqrt(2 * Gravity() * T.stompBounce * TILE); // v² = 2·g·h
     this.jumping = true;
     this.grounded = false;
     this.lastGroundedAt = -Infinity;
-    this.pulseScale(1 - T.squash * 0.7, 1 + T.squash * 0.7, 180);
-    this.scene.cameras.main.shake(80, 0.004);
+    this.PulseScale(1 - T.squash * 0.7, 1 + T.squash * 0.7, 0.18);
+    this.engine.camera.Shake(0.08, 0.004);
   }
 
   // ---------------------------------------------------------------- melee
 
   /**
-   * Punch. What it does is the zombie's call (Zombie.meleeHit): a dizzy Runner takes damage, a
+   * Punch. What it does is the zombie's call (Zombie.MeleeHit): a dizzy Runner takes damage, a
    * distracted Clicker or a Screamer hit from behind is taken down silently, a Clicker that is not
    * busy grabs you, anything else shrugs it off. Works from a crouch too (sneak up, punch).
    */
-  private updateAttack(dt: number, onGround: boolean): void {
+  private UpdateAttack(dt: number, onGround: boolean): void {
     if (this.attackTimer > 0) {
       this.attackTimer -= dt;
       if (this.attackPending && this.attackTimer <= ATTACK_TIME - ATTACK_HIT) {
         this.attackPending = false;
-        this.strike();
+        this.Strike();
       }
       return;
     }
     if (this.aiming || this.throwTimer > 0 || !onGround) return;
-    if (!this.input.buffered(Action.Attack, 150)) return;
-    this.input.consume(Action.Attack);
+    if (!this.input.Buffered(Action.Attack, 150)) return;
+    this.input.Consume(Action.Attack);
     this.attackTimer = ATTACK_TIME;
     this.attackPending = true;
     this.restartAttackAnim = true;
   }
 
-  private strike(): void {
+  private Strike(): void {
     const b = this.body;
     const reach = T.attackReach * TILE;
     const left = this.facing > 0 ? b.right : b.left - reach;
@@ -481,31 +483,31 @@ export class Player {
       if (!z.alive) continue;
       const zb = z.body;
       if (zb.right < left || zb.left > left + reach || zb.bottom < top || zb.top > b.bottom) continue;
-      const result = z.meleeHit(this.feetX);
-      if (result === 'hit') {
-        this.noise.emit(zb.center.x, zb.center.y, T.combatNoise, NoiseKind.Combat);
-        this.scene.cameras.main.shake(90, 0.005);
-      } else if (result === 'takedown') {
-        this.scene.cameras.main.shake(60, 0.003); // silent: no noise
-      } else if (result === 'grab') {
-        z.grab(); // punched a Clicker that wasn't busy: it gets you
-        this.kill();
+      const result = z.MeleeHit(this.feetX);
+      if (result === MeleeResult.Hit) {
+        this.noise.Emit(zb.centerX, zb.centerY, T.combatNoise, NoiseKind.Combat);
+        this.engine.camera.Shake(0.09, 0.005);
+      } else if (result === MeleeResult.Takedown) {
+        this.engine.camera.Shake(0.06, 0.003); // silent: no noise
+      } else if (result === MeleeResult.Grab) {
+        z.Grab(); // punched a Clicker that wasn't busy: it gets you
+        this.Kill();
         return;
       }
     }
   }
 
-  private handX(): number {
+  private HandX(): number {
     return this.feetX + this.facing * TILE * 0.2;
   }
 
-  private handY(): number {
+  private HandY(): number {
     return this.feetY - TILE * 1.75;
   }
 
   // ---------------------------------------------------------------- noise, cover, state
 
-  private footsteps(dt: number, onGround: boolean, speed: number): void {
+  private Footsteps(dt: number, onGround: boolean, speed: number): void {
     if (!onGround || speed < 1) {
       this.stepDistance = 0;
       return;
@@ -515,7 +517,7 @@ export class Player {
     this.stepDistance = 0;
     if (this.crouched) return; // sneaking is silent
     const radius = speed > T.walkSpeed * TILE * 1.1 ? T.sprintNoise : T.walkNoise;
-    this.noise.emit(this.feetX, this.feetY, radius, NoiseKind.Footstep);
+    this.noise.Emit(this.feetX, this.feetY, radius, NoiseKind.Footstep);
     this.stepCount++;
   }
 
@@ -527,16 +529,13 @@ export class Player {
     return speed > 10 ? 1 : 0;
   }
 
-  private behindCover(): boolean {
-    const b = this.body;
-    for (let i = 0; i < this.covers.length; i++) {
-      const c = this.covers[i];
-      if (b.right > c.x && b.left < c.right && b.bottom > c.y && b.top < c.bottom) return true;
-    }
+  private BehindCover(): boolean {
+    const box = this.body.Bounds();
+    for (let i = 0; i < this.covers.length; i++) if (box.Overlaps(this.covers[i])) return true;
     return false;
   }
 
-  private computeState(speed: number): PlayerState {
+  private ComputeState(speed: number): PlayerState {
     if (this.attackTimer > 0) return PlayerState.Attack;
     if (this.throwTimer > 0) return PlayerState.Throw;
     if (this.aiming) return PlayerState.Aim;
@@ -550,43 +549,42 @@ export class Player {
   // ---------------------------------------------------------------- body
 
   /** Switch hitbox height, keeping the feet where they are. */
-  private setCrouched(on: boolean): void {
+  private SetCrouched(on: boolean): void {
     if (this.crouched === on) return;
     const b = this.body;
     const bottom = b.bottom;
     const h = on ? CROUCH_H : PLAYER_H;
-    b.setSize(PLAYER_W, h);
+    b.SetSize(PLAYER_W, h);
     b.position.y = bottom - h;
-    b.updateCenter();
     this.crouched = on;
   }
 
-  private canStand(): boolean {
-    return !this.blockedAt(this.body.x, this.body.bottom - PLAYER_H, PLAYER_H);
+  private CanStand(): boolean {
+    return !this.BlockedAt(this.body.left, this.body.bottom - PLAYER_H, PLAYER_H);
   }
 
   /** Would a body of the given height overlap a solid if its top-left were at (x, y)? */
-  private blockedAt(x: number, y: number, h: number = this.body.height): boolean {
-    const w = PLAYER_W - 2 * OVERLAP_INSET;
-    return this.physics.overlapRect(x + OVERLAP_INSET, y + OVERLAP_INSET, w, h - 2 * OVERLAP_INSET, false, true).length > 0;
+  private BlockedAt(x: number, y: number, h: number = this.body.height): boolean {
+    const box = new Rect(x + OVERLAP_INSET, y + OVERLAP_INSET, PLAYER_W - 2 * OVERLAP_INSET, h - 2 * OVERLAP_INSET);
+    return this.engine.physics.QueryBox(box);
   }
 
   /**
    * Rising and the head is about to hit a ceiling: if sliding sideways by a few pixels clears it,
    * slide (smallest shift wins) and keep the full jump. A wide ceiling still stops you normally.
    */
-  private correctCorner(dy: number): void {
+  private CorrectCorner(dy: number): void {
     const b = this.body;
     const maxShift = Math.floor(T.cornerCorrection * TILE);
-    if (maxShift <= 0 || !this.blockedAt(b.x, b.y + dy)) return;
+    if (maxShift <= 0 || !this.BlockedAt(b.left, b.top + dy)) return;
 
     for (let d = 1; d <= maxShift; d++) {
-      if (!this.blockedAt(b.x - d, b.y + dy)) {
-        this.shift(-d, 0);
+      if (!this.BlockedAt(b.left - d, b.top + dy)) {
+        this.Shift(-d, 0);
         return;
       }
-      if (!this.blockedAt(b.x + d, b.y + dy)) {
-        this.shift(d, 0);
+      if (!this.BlockedAt(b.left + d, b.top + dy)) {
+        this.Shift(d, 0);
         return;
       }
     }
@@ -596,62 +594,61 @@ export class Player {
    * In the air, moving into a wall whose top is just above the feet: pop up onto the ledge
    * instead of sliding down its face.
    */
-  private correctLedge(dx: number): void {
+  private CorrectLedge(dx: number): void {
     const b = this.body;
     const maxShift = Math.floor(T.ledgeCorrection * TILE);
-    if (maxShift <= 0 || !this.blockedAt(b.x + dx, b.y)) return;
+    if (maxShift <= 0 || !this.BlockedAt(b.left + dx, b.top)) return;
 
     for (let d = 1; d <= maxShift; d++) {
-      if (!this.blockedAt(b.x + dx, b.y - d)) {
-        this.shift(0, -d);
+      if (!this.BlockedAt(b.left + dx, b.top - d)) {
+        this.Shift(0, -d);
         return;
       }
     }
   }
 
   /**
-   * Move the body by (dx, dy) plus 1 px in the same direction: blockedAt() tests an inset box, so the
-   * spot it calls "clear" can still overlap the solid by < OVERLAP_INSET, and Arcade would bonk on that.
+   * Move the body by (dx, dy) plus 1 px in the same direction: BlockedAt() tests an inset box, so the
+   * spot it calls "clear" can still overlap the solid by < OVERLAP_INSET.
    */
-  private shift(dx: number, dy: number): void {
+  private Shift(dx: number, dy: number): void {
     this.body.position.x += dx + Math.sign(dx);
     this.body.position.y += dy + Math.sign(dy);
-    this.body.updateCenter();
-    if (this.debugView) this.debugView.onCorrection(this.feetX, dy !== 0 ? this.feetY : this.body.y);
+    if (this.debugView) this.debugView.OnCorrection(this.feetX, dy !== 0 ? this.feetY : this.body.top);
   }
 
-  private jump(): void {
+  private Jump(): void {
     this.jumping = true;
     this.grounded = false;
     this.lastGroundedAt = -Infinity; // no second coyote jump
 
     // The ghost copies the takeoff frame and moves on every new jump.
-    this.ghost.setTexture(this.sprite.texture.key, this.sprite.frame.name).setFlipX(this.sprite.flipX);
-    this.ghost.setPosition(this.feetX, this.feetY).setVisible(T.ghostAlpha > 0).setAlpha(0);
-    this.scene.tweens.killTweensOf(this.ghost);
-    this.scene.tweens.add({ targets: this.ghost, alpha: T.ghostAlpha, duration: 90 });
+    this.ghost.SetTexture(this.sprite.textureKey, this.sprite.frame).SetFlipX(this.sprite.flipX);
+    this.ghost.SetPosition(this.feetX, this.feetY).SetVisible(T.ghostAlpha > 0).SetAlpha(0);
+    this.engine.tweens.Kill(this.ghost);
+    this.engine.tweens.To(this.ghost, { alpha: T.ghostAlpha }, 0.09);
 
-    this.pulseScale(1 - T.squash * 0.6, 1 + T.squash * 0.6, 160);
-    if (this.debugView) this.debugView.onJump();
+    this.PulseScale(1 - T.squash * 0.6, 1 + T.squash * 0.6, 0.16);
+    if (this.debugView) this.debugView.OnJump();
   }
 
-  private land(): void {
-    const impact = Phaser.Math.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
-    this.pulseScale(1 + T.squash * impact, 1 - T.squash * impact, 130);
+  private Land(): void {
+    const impact = MathUtil.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
+    this.PulseScale(1 + T.squash * impact, 1 - T.squash * impact, 0.13);
     if (impact > 0.2) this.landTimer = LAND_ANIM_TIME; // small hops don't need the crouch pose
     if (impact > 0.45) { // hard landings are loud
-      this.noise.emit(this.feetX, this.feetY, T.landNoise, NoiseKind.Landing);
+      this.noise.Emit(this.feetX, this.feetY, T.landNoise, NoiseKind.Landing);
       this.landCount++;
     }
-    if (this.debugView) this.debugView.onLand();
+    if (this.debugView) this.debugView.OnLand();
   }
 
   /** Squash & stretch: snap to (sx, sy), spring back to 1. Visual only, the hitbox never changes. */
-  private pulseScale(sx: number, sy: number, duration: number): void {
+  private PulseScale(sx: number, sy: number, seconds: number): void {
     if (T.squash <= 0) return;
-    this.scene.tweens.killTweensOf(this.view);
-    this.view.setScale(sx, sy);
-    this.scene.tweens.add({ targets: this.view, scaleX: 1, scaleY: 1, duration: duration, ease: 'Back.easeOut' });
+    this.engine.tweens.Kill(this.view);
+    this.view.SetScale(sx, sy);
+    this.engine.tweens.To(this.view, { scaleX: 1, scaleY: 1 }, seconds, { ease: Ease.BackOut });
   }
 }
 
@@ -660,7 +657,7 @@ export class Player {
  *  - "player tuning" folder: a slider for every PlayerTuning value
  *  - "player" folder: live state, hitboxes, jump trail, time scale, infinite bottles, respawn
  *  - jump trail: the real path of the last jump + its measured height / distance in tiles,
- *    which is what level design needs ("can the player make this gap?")
+ *    which is what level design needs ("can the player make this gap?"). Drawn with DebugDraw.
  */
 class PlayerDebug {
   // shown in the panel
@@ -676,65 +673,60 @@ class PlayerDebug {
   infiniteBottles = false;
   timeScale = 1;
 
-  private readonly scene: Phaser.Scene;
+  private readonly engine: Engine;
   private readonly player: Player;
-  private readonly world: Phaser.Physics.Arcade.World;
   private readonly tuning: TuningFolder<PlayerTuning>;
   private readonly folder: GUI;
-  private readonly trail: Phaser.GameObjects.Graphics;
-  private readonly label: Phaser.GameObjects.Text;
-  private points: Phaser.Types.Math.Vector2Like[] = [];
-  private correctionPoints: Phaser.Types.Math.Vector2Like[] = []; // drawn as cyan dots on the trail
-  private startX = 0;
-  private startY = 0;
-  private apexX = 0;
-  private apexY = 0;
+  private points: Vec2[] = [];
+  private correctionPoints: Vec2[] = []; // drawn as cyan dots on the trail
+  private start = new Vec2();
+  private apex = new Vec2();
+  private label = ''; // measured jump, shown above the apex
   private tracking = false;
 
-  constructor(scene: Phaser.Scene, player: Player) {
-    this.scene = scene;
+  constructor(engine: Engine, player: Player) {
+    this.engine = engine;
     this.player = player;
-    this.world = scene.physics.world;
 
     const t = new TuningFolder('player tuning', T);
-    t.add('walkSpeed', 1, 15, 0.1);
-    t.add('sprintSpeed', 1, 20, 0.1);
-    t.add('sneakSpeed', 0.5, 8, 0.1);
-    t.add('accelTime', 0, 0.6, 0.01);
-    t.add('decelTime', 0, 0.6, 0.01);
-    t.add('turnTime', 0, 0.6, 0.01);
-    t.add('airAccelTime', 0, 1, 0.01);
-    t.add('airDecelTime', 0, 1, 0.01);
-    t.add('jumpHeight', 0.5, 8, 0.1);
-    t.add('timeToApex', 0.1, 1, 0.01);
-    t.add('doubleJumpHeight', 0.5, 6, 0.1);
-    t.add('dashSpeed', 5, 40, 0.5);
-    t.add('dashTime', 0.05, 0.5, 0.01);
-    t.add('fallGravityMult', 0.5, 4, 0.05);
-    t.add('jumpCutGravityMult', 1, 6, 0.1);
-    t.add('apexThreshold', 0, 6, 0.1);
-    t.add('apexGravityMult', 0.1, 1, 0.05);
-    t.add('maxFallSpeed', 2, 40, 0.5);
-    t.add('fastFallSpeed', 2, 50, 0.5);
-    t.add('fastFallGravityMult', 1, 4, 0.1);
-    t.add('coyoteMs', 0, 300, 5);
-    t.add('jumpBufferMs', 0, 300, 5);
-    t.add('cornerCorrection', 0, 0.5, 0.01);
-    t.add('ledgeCorrection', 0, 0.5, 0.01);
-    t.add('walkNoise', 0, 10, 0.1);
-    t.add('sprintNoise', 0, 15, 0.1);
-    t.add('landNoise', 0, 15, 0.1);
-    t.add('combatNoise', 0, 15, 0.1);
-    t.add('attackReach', 0.3, 3, 0.05);
-    t.add('stompBounce', 0.5, 5, 0.1);
-    t.add('strideLength', 0.3, 3, 0.05);
-    t.add('squash', 0, 0.6, 0.01);
-    t.add('ghostAlpha', 0, 1, 0.01);
-    t.add('listenTime', 0.5, 15, 0.1);
-    t.add('listenRecharge', 0.5, 20, 0.1);
+    t.Add('walkSpeed', 1, 15, 0.1);
+    t.Add('sprintSpeed', 1, 20, 0.1);
+    t.Add('sneakSpeed', 0.5, 8, 0.1);
+    t.Add('accelTime', 0, 0.6, 0.01);
+    t.Add('decelTime', 0, 0.6, 0.01);
+    t.Add('turnTime', 0, 0.6, 0.01);
+    t.Add('airAccelTime', 0, 1, 0.01);
+    t.Add('airDecelTime', 0, 1, 0.01);
+    t.Add('jumpHeight', 0.5, 8, 0.1);
+    t.Add('timeToApex', 0.1, 1, 0.01);
+    t.Add('doubleJumpHeight', 0.5, 6, 0.1);
+    t.Add('dashSpeed', 5, 40, 0.5);
+    t.Add('dashTime', 0.05, 0.5, 0.01);
+    t.Add('fallGravityMult', 0.5, 4, 0.05);
+    t.Add('jumpCutGravityMult', 1, 6, 0.1);
+    t.Add('apexThreshold', 0, 6, 0.1);
+    t.Add('apexGravityMult', 0.1, 1, 0.05);
+    t.Add('maxFallSpeed', 2, 40, 0.5);
+    t.Add('fastFallSpeed', 2, 50, 0.5);
+    t.Add('fastFallGravityMult', 1, 4, 0.1);
+    t.Add('coyoteMs', 0, 300, 5);
+    t.Add('jumpBufferMs', 0, 300, 5);
+    t.Add('cornerCorrection', 0, 0.5, 0.01);
+    t.Add('ledgeCorrection', 0, 0.5, 0.01);
+    t.Add('walkNoise', 0, 10, 0.1);
+    t.Add('sprintNoise', 0, 15, 0.1);
+    t.Add('landNoise', 0, 15, 0.1);
+    t.Add('combatNoise', 0, 15, 0.1);
+    t.Add('attackReach', 0.3, 3, 0.05);
+    t.Add('stompBounce', 0.5, 5, 0.1);
+    t.Add('strideLength', 0.3, 3, 0.05);
+    t.Add('squash', 0, 0.6, 0.01);
+    t.Add('ghostAlpha', 0, 1, 0.01);
+    t.Add('listenTime', 0.5, 15, 0.1);
+    t.Add('listenRecharge', 0.5, 20, 0.1);
     this.tuning = t;
 
-    const f = debug.gui.addFolder('player');
+    const f = debugPanel.gui.addFolder('player');
     f.add(this, 'state').listen().disable();
     f.add(this, 'grounded').listen().disable();
     f.add(this, 'hidden').listen().disable();
@@ -742,31 +734,20 @@ class PlayerDebug {
     f.add(this, 'vx').name('vx (tiles/s)').listen().disable();
     f.add(this, 'vy').name('vy (tiles/s)').listen().disable();
     f.add(this, 'corrections').name('corner/ledge fixes').listen().disable();
-    f.add(this, 'showHitboxes').name('show hitboxes').onChange(() => this.applyHitboxes());
-    f.add(this, 'showTrail').name('show jump trail').onChange(() => this.applyTrailVisibility());
+    f.add(this, 'showHitboxes').name('show hitboxes').onChange(() => { engine.physics.drawBodies = this.showHitboxes; });
+    f.add(this, 'showTrail').name('show jump trail');
     f.add(this, 'infiniteBottles').name('infinite bottles');
-    f.add(this, 'timeScale', 0.1, 1, 0.05).name('time scale').onChange(() => this.applyTimeScale());
-    f.add(player, 'respawn').name('respawn');
+    f.add(this, 'timeScale', 0.1, 1, 0.05).name('time scale').onChange(() => { engine.timeScale = this.timeScale; });
+    f.add(player, 'Respawn').name('respawn');
     this.folder = f;
-
-    this.trail = scene.add.graphics().setVisible(this.showTrail);
-    this.label = scene.add.text(0, 0, '', {
-      fontFamily: 'Consolas, monospace',
-      fontSize: '22px',
-      color: '#ffffff',
-      backgroundColor: '#00000088',
-      padding: { x: 6, y: 3 },
-    });
-    this.label.setOrigin(0.5, 1).setVisible(false); // an empty label would still draw its background
   }
 
-  destroy(): void {
-    this.tuning.destroy();
+  Destroy(): void {
+    this.tuning.Destroy();
     this.folder.destroy();
-    this.world.timeScale = 1;
   }
 
-  onStep(): void {
+  OnStep(): void {
     const p = this.player;
     this.state = PlayerState[p.state];
     this.grounded = p.grounded;
@@ -777,74 +758,44 @@ class PlayerDebug {
     this.vy = p.grounded ? 0 : Math.round((p.body.velocity.y / TILE) * 100) / 100;
 
     if (!this.tracking) return;
-    this.points.push({ x: p.feetX, y: p.feetY });
-    if (p.feetY < this.apexY) {
-      this.apexX = p.feetX;
-      this.apexY = p.feetY;
-    }
-    this.drawTrail();
+    this.points.push(new Vec2(p.feetX, p.feetY));
+    if (p.feetY < this.apex.y) this.apex.Set(p.feetX, p.feetY);
   }
 
-  onJump(): void {
-    this.startX = this.player.feetX;
-    this.startY = this.player.feetY;
-    this.apexX = this.startX;
-    this.apexY = this.startY;
-    this.points = [{ x: this.startX, y: this.startY }];
+  OnJump(): void {
+    this.start.Set(this.player.feetX, this.player.feetY);
+    this.apex.Copy(this.start);
+    this.points = [this.start.Clone()];
     this.correctionPoints = [];
     this.tracking = true;
-    this.label.setVisible(false);
+    this.label = '';
   }
 
-  onLand(): void {
+  OnLand(): void {
     if (!this.tracking) return;
     this.tracking = false;
-    const height = (this.startY - this.apexY) / TILE;
-    const distance = Math.abs(this.player.feetX - this.startX) / TILE;
-    const rise = (this.startY - this.player.feetY) / TILE;
+    const height = (this.start.y - this.apex.y) / TILE;
+    const distance = Math.abs(this.player.feetX - this.start.x) / TILE;
+    const rise = (this.start.y - this.player.feetY) / TILE;
     const riseText = (rise >= 0 ? 'up ' : 'down ') + Math.abs(rise).toFixed(2);
-    this.label.setText('height ' + height.toFixed(2) + 't   distance ' + distance.toFixed(2) + 't   ' + riseText + 't');
-    this.label.setPosition(this.apexX, this.apexY - 44).setVisible(this.showTrail);
-    this.drawTrail();
+    this.label = 'height ' + height.toFixed(2) + 't   distance ' + distance.toFixed(2) + 't   ' + riseText + 't';
   }
 
-  onCorrection(x: number, y: number): void {
+  OnCorrection(x: number, y: number): void {
     this.corrections++;
-    this.correctionPoints.push({ x: x, y: y });
-    this.drawTrail();
+    this.correctionPoints.push(new Vec2(x, y));
   }
 
-  private drawTrail(): void {
-    const g = this.trail;
-    g.clear();
-    g.fillStyle(0x66ffff, 1);
-    for (let i = 0; i < this.correctionPoints.length; i++) {
-      g.fillCircle(this.correctionPoints[i].x, this.correctionPoints[i].y, 7);
-    }
+  /** Every frame (immediate mode): the last jump's path, its takeoff and apex lines, the measurement. */
+  Draw(): void {
+    if (!this.showTrail) return;
+    const d = this.engine.debug;
+    for (let i = 0; i < this.correctionPoints.length; i++) d.Point(this.correctionPoints[i], 0x66ffff, 7);
     if (this.points.length < 2) return;
-    g.lineStyle(3, 0xffffff, 0.8);
-    g.strokePoints(this.points, false);
-    g.lineStyle(1, 0xffffff, 0.35);
-    g.lineBetween(this.startX - 60, this.startY, this.startX + 60, this.startY); // takeoff height
-    g.lineStyle(2, 0xffff66, 0.9);
-    g.lineBetween(this.apexX - 40, this.apexY, this.apexX + 40, this.apexY); // apex
-    g.fillStyle(0xffff66, 1);
-    g.fillCircle(this.apexX, this.apexY, 5);
-  }
-
-  private applyHitboxes(): void {
-    if (this.showHitboxes && !this.world.debugGraphic) this.world.createDebugGraphic();
-    this.world.drawDebug = this.showHitboxes;
-    if (this.world.debugGraphic) this.world.debugGraphic.clear().setVisible(this.showHitboxes);
-  }
-
-  private applyTrailVisibility(): void {
-    this.trail.setVisible(this.showTrail);
-    this.label.setVisible(this.showTrail && this.label.text !== '');
-  }
-
-  private applyTimeScale(): void {
-    this.world.timeScale = 1 / this.timeScale; // Arcade: bigger timeScale = slower
-    this.scene.tweens.timeScale = this.timeScale;
+    for (let i = 1; i < this.points.length; i++) d.Line(this.points[i - 1], this.points[i], 0xffffff, 0.8, 3);
+    d.Line(new Vec2(this.start.x - 60, this.start.y), new Vec2(this.start.x + 60, this.start.y), 0xffffff, 0.35, 1); // takeoff height
+    d.Line(new Vec2(this.apex.x - 40, this.apex.y), new Vec2(this.apex.x + 40, this.apex.y), 0xffff66, 0.9); // apex
+    d.Point(this.apex, 0xffff66, 5);
+    if (this.label) d.Text(new Vec2(this.apex.x, this.apex.y - 70), this.label);
   }
 }

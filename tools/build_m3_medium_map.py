@@ -1,6 +1,6 @@
 """
 Builds MECHANIC 3 MEDIUM's ASCII map (scavenge & upgrade: one gas canister, two upgrades), printed as a
-TypeScript array to paste into src/game/Levels.ts (M3_MEDIUM_MAP).
+TypeScript array to paste into src/game/levels/Levels.ts (M3_MEDIUM_MAP).
 
 You have the spring boots (double jump: LevelData.grants). A sea cuts the way; falling in kills you.
 The workbench before it can build BRACE BOOTS (dash: 2 steel wire + the gas) or BREATH PILLS (breathe

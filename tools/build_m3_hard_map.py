@@ -1,6 +1,6 @@
 """
 Builds MECHANIC 3 HARD's ASCII map (scavenge & upgrade: everything, in sequence), printed as a
-TypeScript array to paste into src/game/Levels.ts (M3_HARD_MAP).
+TypeScript array to paste into src/game/levels/Levels.ts (M3_HARD_MAP).
 
 You have the spring boots (double jump: LevelData.grants). This time there are TWO gas canisters: build
 both upgrades, the route needs them one after the other.

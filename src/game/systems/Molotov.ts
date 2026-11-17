@@ -1,13 +1,12 @@
-import Phaser from 'phaser';
-import { DEBUG_ENABLED } from '../core/Debug';
-import { Action, type InputActions } from '../core/InputActions';
-import { ART_SCALE, TILE } from './constants';
-import type { Dialogue } from './Dialogue';
-import { KeyColor, type LevelProgress } from './Levels';
+import { DEBUG_ENABLED, Ease, Rect, type Engine, type Sprite, type Text } from '../../engine';
+import { Action } from '../Actions';
+import { ART_SCALE, GOLD, Serif, TILE } from '../constants';
+import type { Player } from '../entities/Player';
+import type { Zombie } from '../entities/Zombie';
+import { KeyColor, type LevelProgress } from '../levels/Levels';
+import type { Dialogue } from '../ui/Dialogue';
 import type { Locks } from './Locks';
-import type { Player } from './Player';
 import type { Throwables } from './Throwing';
-import type { Zombie } from './Zombie';
 
 /**
  * Medium level: the horde and the Molotov.
@@ -61,60 +60,55 @@ const FIRE_SPREAD = 0.08; // s per tile: how fast the flames run along the horde
 const GROUND_FIRE_TIME = 3.5; // s
 
 export class MolotovQuest {
-  private readonly scene: Phaser.Scene;
-  private readonly input: InputActions;
+  private readonly engine: Engine;
   private readonly dialogue: Dialogue;
   private readonly progress: LevelProgress;
   private readonly throwables: Throwables;
   private readonly locks: Locks;
-  private readonly banner: (text: string, ms: number) => void;
+  private readonly banner: (text: string, seconds: number) => void;
   private readonly horde: Zombie[] = [];
-  private car: Phaser.GameObjects.Image | null = null;
+  private car: Sprite | null = null;
   private carX = 0;
   private carY = 0;
-  private marker: Phaser.GameObjects.Text | null = null;
-  private prompt: Phaser.GameObjects.Text | null = null;
-  private arena = new Phaser.Geom.Rectangle(0, 0, 0, 0); // where a Molotov sets the horde on fire
+  private marker: Text | null = null;
+  private prompt: Text | null = null;
+  private readonly arena = new Rect(); // where a Molotov sets the horde on fire
 
-  constructor(scene: Phaser.Scene, input: InputActions, dialogue: Dialogue, progress: LevelProgress,
-    throwables: Throwables, locks: Locks, banner: (text: string, ms: number) => void) {
-    this.scene = scene;
-    this.input = input;
+  constructor(engine: Engine, dialogue: Dialogue, progress: LevelProgress,
+    throwables: Throwables, locks: Locks, banner: (text: string, seconds: number) => void) {
+    this.engine = engine;
     this.dialogue = dialogue;
     this.progress = progress;
     this.throwables = throwables;
     this.locks = locks;
     this.banner = banner;
     if (progress.molotov) throwables.molotovs = 1; // crafted before a death: still in hand
-    throwables.onMolotov = (x, y) => this.molotovLanded(x, y);
+    throwables.onMolotov = (x, y) => this.MolotovLanded(x, y);
   }
 
-  addCar(feetX: number, feetY: number): void {
+  AddCar(feetX: number, feetY: number): void {
+    const r = this.engine.renderer;
     this.carX = feetX;
     this.carY = feetY;
     const open = this.progress.carStage >= 3;
-    this.car = this.scene.add.image(feetX, feetY, open ? 'car_open' : 'car_chained').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(4);
+    this.car = r.CreateSprite(feetX, feetY, open ? 'car_open' : 'car_chained').SetOrigin(0.5, 1).SetScale(ART_SCALE).SetDepth(4);
     // gasoline dripping from the tank into the puddle
-    const drop = this.scene.add.rectangle(feetX - 34, feetY - 30, 3, 5, 0x2a2633).setDepth(5);
-    this.scene.tweens.add({ targets: drop, y: feetY - 2, duration: 520, ease: 'Quad.easeIn', repeat: -1, repeatDelay: 380 });
-    this.marker = this.scene.add.text(feetX, feetY - TILE * 1.7, '!', {
-      fontFamily: 'Georgia, serif', fontSize: '56px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 8,
-    }).setOrigin(0.5, 1).setDepth(25);
-    this.prompt = this.scene.add.text(feetX, feetY - TILE * 1.75, '↑  Look', {
-      fontFamily: 'Georgia, serif', fontSize: '26px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 5,
-    }).setOrigin(0.5, 1).setDepth(25).setVisible(false);
+    const drop = r.CreateShape(feetX - 34, feetY - 30).FillStyle(0x2a2633, 1).FillRect(-1.5, -2.5, 3, 5).SetDepth(5);
+    this.engine.tweens.To(drop, { y: feetY - 2 }, 0.52, { ease: Ease.QuadIn, repeat: -1, repeatDelay: 0.38 });
+    this.marker = r.CreateText(feetX, feetY - TILE * 1.7, '!', Serif(56, 'bold', GOLD, 8)).SetOrigin(0.5, 1).SetDepth(25);
+    this.prompt = r.CreateText(feetX, feetY - TILE * 1.75, '↑  Look', Serif(26)).SetOrigin(0.5, 1).SetDepth(25).SetVisible(false);
   }
 
-  /** A feeding horde Clicker. Call finishSetup() after the last one. */
-  addHorde(z: Zombie): void {
+  /** A feeding horde Clicker. Call FinishSetup() after the last one. */
+  AddHorde(z: Zombie): void {
     z.feeding = true;
     this.horde.push(z);
   }
 
   /** After spawning: the fire zone around the horde; a horde already burned (before a death) = open gate. */
-  finishSetup(): void {
+  FinishSetup(): void {
     if (this.progress.hordeBurned) {
-      this.locks.openGates();
+      this.locks.OpenGates();
       return;
     }
     if (this.horde.length === 0) return;
@@ -125,139 +119,141 @@ export class MolotovQuest {
       maxX = Math.max(maxX, this.horde[i].feetX);
     }
     const floor = this.horde[0].feetY;
-    this.arena.setTo(minX - 3 * TILE, floor - 9 * TILE, maxX - minX + 6 * TILE, 9.5 * TILE);
+    this.arena.Set(minX - 3 * TILE, floor - 9 * TILE, maxX - minX + 6 * TILE, 9.5 * TILE);
   }
 
-  /** Once per frame, after input. Opens dialogues (the scene pauses while one is open). */
-  update(timeMs: number, player: Player): void {
+  /** Once per frame, after input. Opens dialogues (the world pauses while one is open). */
+  Update(timeMs: number, player: Player): void {
     const p = this.progress;
-    if (DEBUG_ENABLED) this.devShortcuts();
+    const input = this.engine.input;
+    if (DEBUG_ENABLED) this.DevShortcuts();
 
     // The overlook: first sight of the horde.
     if (!p.sawHorde && this.horde.length > 0 && !player.dead
       && player.feetX > this.arena.x + (3 - OVERLOOK_DISTANCE) * TILE && player.feetY < this.arena.bottom - 4 * TILE) {
       p.sawHorde = true;
-      this.dialogue.show(HORDE_SEEN);
+      this.dialogue.Show(HORDE_SEEN);
       return;
     }
 
     if (!this.car || !this.marker || !this.prompt) return;
     const near = !player.dead && Math.abs(player.feetX - this.carX) < READ_RANGE_X && Math.abs(player.feetY - this.carY) < READ_RANGE_Y;
-    this.prompt.setVisible(near);
-    this.marker.setVisible(!near && this.carHasNews());
+    this.prompt.SetVisible(near);
+    this.marker.SetVisible(!near && this.CarHasNews());
     this.marker.y = this.carY - TILE * 1.7 + Math.sin(timeMs / 220) * 8;
-    this.marker.setScale(1 + Math.sin(timeMs / 140) * 0.08);
-    if (near && this.input.pressed(Action.Up) && !this.input.held(Action.Throw)) this.lookAtCar();
+    this.marker.SetScale(1 + Math.sin(timeMs / 140) * 0.08);
+    if (near && input.Pressed(Action.Up) && !input.Held(Action.Throw)) this.LookAtCar();
   }
 
   /** At the physics rate: the moment the last horde zombie dies, the gate opens. */
-  fixedUpdate(): void {
+  FixedUpdate(): void {
     const p = this.progress;
     if (p.hordeBurned || this.horde.length === 0) return;
     for (let i = 0; i < this.horde.length; i++) if (this.horde[i].alive) return;
     p.hordeBurned = true;
-    this.locks.openGates();
-    this.scene.time.delayedCall(900, () => this.dialogue.show(HORDE_BURNED));
+    this.locks.OpenGates();
+    this.engine.clock.After(0.9, () => this.dialogue.Show(HORDE_BURNED));
   }
 
   /** "!" over the car: there is something new to think about there. */
-  private carHasNews(): boolean {
+  private CarHasNews(): boolean {
     const p = this.progress;
     if (p.molotov) return false;
     if (p.carStage === 0 || p.rag) return true;
     if (!p.sawHorde) return false;
-    return p.carStage < 2 || this.allKeys();
+    return p.carStage < 2 || this.AllKeys();
   }
 
-  private allKeys(): boolean {
+  private AllKeys(): boolean {
     const held = this.progress.keyHeld;
     return held[KeyColor.Red] && held[KeyColor.Green] && held[KeyColor.Blue];
   }
 
-  private lookAtCar(): void {
+  private LookAtCar(): void {
     const p = this.progress;
     if (p.molotov) {
-      this.dialogue.show(CAR_DONE);
+      this.dialogue.Show(CAR_DONE);
     } else if (p.rag) {
-      this.dialogue.show(CRAFT, () => this.craft());
+      this.dialogue.Show(CRAFT, () => this.Craft());
     } else if (!p.sawHorde) {
       if (p.carStage === 0) {
         p.carStage = 1;
-        this.dialogue.show(CAR_FIRST);
+        this.dialogue.Show(CAR_FIRST);
       } else {
-        this.dialogue.show(CAR_WAIT);
+        this.dialogue.Show(CAR_WAIT);
       }
-    } else if (this.allKeys()) {
-      this.dialogue.show(CAR_OPEN.concat(CRAFT), () => {
+    } else if (this.AllKeys()) {
+      this.dialogue.Show(CAR_OPEN.concat(CRAFT), () => {
         p.keysUsed = true;
         p.keyHeld = [false, false, false];
         p.carStage = 3;
-        if (this.car) this.car.setTexture('car_open');
-        this.craft();
+        if (this.car) this.car.SetTexture('car_open');
+        this.Craft();
       });
     } else if (p.carStage < 2) {
       p.carStage = 2;
-      this.dialogue.show(CAR_PLAN);
+      this.dialogue.Show(CAR_PLAN);
     } else {
       const missing: string[] = [];
       for (let c = 0; c < KeyColor.Count; c++) if (!p.keyHeld[c]) missing.push(KEY_NAMES[c]);
-      this.dialogue.show(['ما زال ينقصني: المفتاح ' + missing.join('، والمفتاح ') + '.']);
+      this.dialogue.Show(['ما زال ينقصني: المفتاح ' + missing.join('، والمفتاح ') + '.']);
     }
   }
 
-  private craft(): void {
+  private Craft(): void {
     const p = this.progress;
     p.rag = false;
     p.molotov = true;
     this.throwables.molotovs = 1;
-    this.banner('NEW SKILL: MOLOTOV', 2600);
+    this.banner('NEW SKILL: MOLOTOV', 2.6);
   }
 
   /** Where the Molotov broke. Among the horde: everything burns, the flames running out from the impact. */
-  private molotovLanded(x: number, y: number): void {
-    if (!this.arena.contains(x, y) || this.progress.hordeBurned) {
+  private MolotovLanded(x: number, y: number): void {
+    if (!this.arena.Contains(x, y) || this.progress.hordeBurned) {
       this.throwables.molotovs = 1; // the rag went out: you still have it
-      this.scene.time.delayedCall(500, () => this.dialogue.show(MOLOTOV_MISS));
+      this.engine.clock.After(0.5, () => this.dialogue.Show(MOLOTOV_MISS));
       return;
     }
-    const cam = this.scene.cameras.main;
-    cam.flash(260, 255, 150, 60);
-    cam.shake(380, 0.008);
+    const cam = this.engine.camera;
+    cam.Flash(0.26, 0xff963c);
+    cam.Shake(0.38, 0.008);
     for (let i = 0; i < this.horde.length; i++) {
       const z = this.horde[i];
-      z.ignite(Math.abs(z.feetX - x) / TILE * FIRE_SPREAD);
+      z.Ignite(Math.abs(z.feetX - x) / TILE * FIRE_SPREAD);
     }
     // flames on the ground along the whole pile, lit in the same outward order
     const floor = this.horde.length > 0 ? this.horde[0].feetY : y;
     for (let fx = this.arena.x + 2 * TILE; fx < this.arena.right - 2 * TILE; fx += TILE * 1.2) {
-      const delay = (Math.abs(fx - x) / TILE) * FIRE_SPREAD * 1000;
-      this.scene.time.delayedCall(delay, () => this.groundFire(fx + (Math.random() - 0.5) * 20, floor));
+      const delay = (Math.abs(fx - x) / TILE) * FIRE_SPREAD;
+      this.engine.clock.After(delay, () => this.GroundFire(fx + (Math.random() - 0.5) * 20, floor));
     }
   }
 
-  private groundFire(x: number, floorY: number): void {
-    const f = this.scene.add.sprite(x, floorY + 4, 'fire').setOrigin(0.5, 1).setScale(1.6 + Math.random() * 0.8).setDepth(7);
-    f.play({ key: 'fire', startFrame: Math.floor(Math.random() * 8) });
-    this.scene.tweens.add({ targets: f, alpha: 0, delay: GROUND_FIRE_TIME * 1000, duration: 1500, onComplete: () => f.destroy() });
+  private GroundFire(x: number, floorY: number): void {
+    const f = this.engine.renderer.CreateSprite(x, floorY + 4, 'fire').SetOrigin(0.5, 1).SetScale(1.6 + Math.random() * 0.8).SetDepth(7);
+    this.engine.animations.Create(f).Play('fire', false, Math.floor(Math.random() * 8));
+    this.engine.tweens.To(f, { alpha: 0 }, 1.5, { delay: GROUND_FIRE_TIME, onDone: () => f.Destroy() });
   }
 
   /** 1 = next coloured key, 2 = the rag (skips the trunk: the car then crafts the Molotov). */
-  private devShortcuts(): void {
+  private DevShortcuts(): void {
     const p = this.progress;
-    if (this.input.pressed(Action.Num1)) {
+    const input = this.engine.input;
+    if (input.Pressed(Action.Num1)) {
       for (let c = 0; c < KeyColor.Count; c++) {
         if (p.keyHeld[c] || p.keysUsed) continue;
         p.keyHeld[c] = true;
         p.keyDropped[c] = true; // its guardians won't drop a second one
-        this.banner('DEV: ' + ['RED', 'GREEN', 'BLUE'][c] + ' KEY', 900);
+        this.banner('DEV: ' + ['RED', 'GREEN', 'BLUE'][c] + ' KEY', 0.9);
         break;
       }
     }
-    if (this.input.pressed(Action.Num2) && !p.molotov) {
+    if (input.Pressed(Action.Num2) && !p.molotov) {
       p.rag = true;
       p.sawHorde = true;
       p.carStage = Math.max(p.carStage, 2);
-      this.banner('DEV: RAG', 900);
+      this.banner('DEV: RAG', 0.9);
     }
   }
 }

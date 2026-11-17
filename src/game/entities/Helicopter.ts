@@ -1,5 +1,5 @@
-import Phaser from 'phaser';
-import { ART_SCALE, TILE } from './constants';
+import { MathUtil, type Engine, type Rect, type Shape, type Sprite } from '../../engine';
+import { ART_SCALE, TILE } from '../constants';
 import type { Player } from './Player';
 import { Sniper, SniperKind } from './Sniper';
 import type { Zombie } from './Zombie';
@@ -39,46 +39,46 @@ export class Helicopter {
 
   private readonly player: Player;
   private readonly def: HeliDef;
-  private readonly sprite: Phaser.GameObjects.Image;
-  private readonly rotor: Phaser.GameObjects.Graphics;
+  private readonly sprite: Sprite;
+  private readonly rotor: Shape;
   private x: number; // px, centre
   private readonly y: number;
   private vx = 0;
-  private active = false; // waits for start()
+  private active = false; // waits for Start()
 
-  constructor(scene: Phaser.Scene, def: HeliDef, player: Player, zombies: Zombie[], covers: Phaser.Geom.Rectangle[],
+  constructor(engine: Engine, def: HeliDef, player: Player, zombies: Zombie[], covers: Rect[],
     solidAt: (x: number, y: number) => boolean, onCoverHit: (x: number, y: number) => void) {
     this.player = player;
     this.def = def;
     this.x = player.feetX - START_BEHIND * TILE;
     this.y = def.y * TILE;
-    this.sprite = scene.add.image(this.x, this.y, 'helicopter').setScale(ART_SCALE).setDepth(29);
-    this.rotor = scene.add.graphics().setDepth(29);
+    this.sprite = engine.renderer.CreateSprite(this.x, this.y, 'helicopter').SetScale(ART_SCALE).SetDepth(29);
+    this.rotor = engine.renderer.CreateShape().SetDepth(29);
     const whole: [number, number] = [0, 9999];
-    this.sniper = new Sniper(scene, {
+    this.sniper = new Sniper(engine, {
       kind: SniperKind.Rifle, tile: [0, 0], area: whole, mad: true, mounted: true,
       zones: [{ x0: 0, y0: 0, x1: 1, y1: 1, weight: 1 }],
     }, player, zombies, covers, solidAt, onCoverHit);
-    this.gunner = new Sniper(scene, {
+    this.gunner = new Sniper(engine, {
       kind: SniperKind.Gunner, tile: [0, 0], area: whole, mounted: true,
       zones: [{ x0: 0, y0: 0, x1: 1, y1: 1, weight: 1 }],
     }, player, zombies, covers, solidAt, onCoverHit);
     this.sniper.active = false;
     this.gunner.active = false;
-    this.placeWeapons(0);
+    this.PlaceWeapons(0);
   }
 
   /** The chase begins (after the opening thoughts). */
-  start(): void {
+  Start(): void {
     this.active = true;
     const ground = this.player.feetY - TILE; // both dots start on the ground under the helicopter
-    this.sniper.setLaser(this.x, ground);
-    this.gunner.setLaser(this.x, ground);
-    this.sniper.holdFire(START_GRACE); // a moment to get moving (level start, checkpoint)
+    this.sniper.SetLaser(this.x, ground);
+    this.gunner.SetLaser(this.x, ground);
+    this.sniper.HoldFire(START_GRACE); // a moment to get moving (level start, checkpoint)
   }
 
   /** At the physics rate: fly after the player, carry the weapons, then let them work. */
-  fixedUpdate(dt: number, timeMs: number): void {
+  FixedUpdate(dt: number, timeMs: number): void {
     const p = this.player;
     const safe = p.feetX > this.def.safeX * TILE;
     const hunting = this.active && !safe && !p.dead;
@@ -86,7 +86,7 @@ export class Helicopter {
       const gap = p.feetX - this.x;
       const speed = (Math.abs(gap) > CATCH_UP_GAP * TILE ? CATCH_UP_SPEED : FOLLOW_SPEED) * TILE;
       // the gunner is cutting down an infected: the pilot holds the helicopter steady for him
-      const want = this.gunner.busyWithInfected ? 0 : Phaser.Math.Clamp(gap * 3, -speed, speed); // eases in over you
+      const want = this.gunner.busyWithInfected ? 0 : MathUtil.Clamp(gap * 3, -speed, speed); // eases in over you
       this.vx += (want - this.vx) * Math.min(1, dt * 2.5);
       this.x += this.vx * dt;
     } else {
@@ -95,31 +95,31 @@ export class Helicopter {
     }
     this.sniper.active = hunting;
     this.gunner.active = hunting;
-    this.placeWeapons(timeMs);
-    this.sniper.fixedUpdate(dt);
-    this.gunner.fixedUpdate(dt);
+    this.PlaceWeapons(timeMs);
+    this.sniper.FixedUpdate(dt);
+    this.gunner.FixedUpdate(dt);
   }
 
-  private placeWeapons(timeMs: number): void {
+  private PlaceWeapons(timeMs: number): void {
     const bob = Math.sin(timeMs / 420) * 6;
-    this.sniper.setMuzzle(this.x + SNIPER_DOOR_X, this.y + SNIPER_DOOR_Y + bob);
-    this.gunner.setMuzzle(this.x + GUN_X, this.y + GUN_Y + bob);
+    this.sniper.SetMuzzle(this.x + SNIPER_DOOR_X, this.y + SNIPER_DOOR_Y + bob);
+    this.gunner.SetMuzzle(this.x + GUN_X, this.y + GUN_Y + bob);
     const cx = this.x / TILE;
-    this.gunner.setZone(cx - GUN_BACK, this.def.y + 2, cx + GUN_AHEAD, 40);
+    this.gunner.SetZone(cx - GUN_BACK, this.def.y + 2, cx + GUN_AHEAD, 40);
   }
 
   /** Visuals, once per frame: body bob + tilt into the chase, a spinning rotor. */
-  update(timeMs: number): void {
+  Update(timeMs: number): void {
     const bob = Math.sin(timeMs / 420) * 6;
-    const tilt = Phaser.Math.Clamp(this.vx / (CATCH_UP_SPEED * TILE), -1, 1) * 0.08;
-    this.sprite.setPosition(this.x, this.y + bob).setRotation(tilt);
+    const tilt = MathUtil.Clamp(this.vx / (CATCH_UP_SPEED * TILE), -1, 1) * 0.08;
+    this.sprite.SetPosition(this.x, this.y + bob).SetRotation(tilt);
     const g = this.rotor;
-    g.clear();
+    g.Clear();
     const span = 120 + Math.abs(Math.sin(timeMs / 30)) * 80; // the blades blur in and out
     const top = this.y + bob - 40;
-    g.fillStyle(0x2a2a2a, 0.85).fillRect(this.x + 2 - span, top, span * 2, 4);
-    g.fillStyle(0x2a2a2a, 0.35).fillRect(this.x + 2 - span * 1.15, top + 1, span * 2.3, 2);
-    this.sniper.update(timeMs);
-    this.gunner.update(timeMs);
+    g.FillStyle(0x2a2a2a, 0.85).FillRect(this.x + 2 - span, top, span * 2, 4);
+    g.FillStyle(0x2a2a2a, 0.35).FillRect(this.x + 2 - span * 1.15, top + 1, span * 2.3, 2);
+    this.sniper.Update(timeMs);
+    this.gunner.Update(timeMs);
   }
 }

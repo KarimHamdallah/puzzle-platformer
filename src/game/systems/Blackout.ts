@@ -1,12 +1,12 @@
-import Phaser from 'phaser';
-import { TILE } from './constants';
+import type { Canvas, Engine, Shape, Sprite } from '../../engine';
+import { Serif, TILE } from '../constants';
+import type { Player } from '../entities/Player';
+import { ZombieKind, type Zombie } from '../entities/Zombie';
 import type { NoiseSystem } from './Noise';
-import type { Player } from './Player';
-import { ZombieKind, type Zombie } from './Zombie';
 
 /**
  * Hard level: night, and the Listen Mode upgrade.
- *  - Darkness: everything past ~3.5 tiles from the player is black (a screen-space layer with a soft
+ *  - Darkness: everything past ~3.5 tiles from the player is black (a screen-space canvas with a soft
  *    hole of light around him). HUD, aim arc and noise rings draw above it.
  *  - Clicks: every Clicker flashes a little light at its head every 2-3 s. In the dark, that is how
  *    you find them.
@@ -37,6 +37,8 @@ const BAR_H = 12;
 const BAR_READY = 0x8fc8ff;
 const BAR_EMPTY = 0xff6a58;
 const DEPTH_NIGHT = 40; // above the world, below the HUD (50); rings / aim / silhouettes go above it
+const LIGHT_PLAYER = 'light_player';
+const LIGHT_CLICK = 'light_click';
 
 // Lightning brightness over time (s after the strike): a double flash, then a fade back to night.
 const FLASH_KEYS: [number, number][] = [[0, 1], [0.08, 0.35], [0.14, 1], [0.24, 0.7], [0.7, 0]];
@@ -48,77 +50,58 @@ interface Click {
 }
 
 export class Blackout {
-  private readonly scene: Phaser.Scene;
+  private readonly engine: Engine;
   private readonly player: Player;
   private readonly zombies: Zombie[];
   private readonly noise: NoiseSystem;
   private readonly night: boolean;
-  private darkness: Phaser.GameObjects.RenderTexture | null = null;
-  private lightImg: Phaser.GameObjects.Image | null = null;
-  private clickImg: Phaser.GameObjects.Image | null = null;
+  private darkness: Canvas | null = null;
   private readonly clicks: Click[] = [];
   private readonly clickTimers = new Map<Zombie, number>();
   private strikeTimer = FIRST_STRIKE;
   private flashAge = -1; // s since the last lightning, -1 = none in progress
   private thunderTimer = -1; // s until the thunder, -1 = none pending
-  private grey: Phaser.FX.ColorMatrix | null = null;
-  private greyOn = false;
-  private readonly ghosts: Phaser.GameObjects.Sprite[] = []; // Listen Mode silhouettes
-  private bar: Phaser.GameObjects.Graphics | null = null;
+  private readonly ghosts: Sprite[] = []; // Listen Mode silhouettes
+  private bar: Shape | null = null;
 
-  constructor(scene: Phaser.Scene, player: Player, zombies: Zombie[], noise: NoiseSystem, night: boolean) {
-    this.scene = scene;
+  constructor(engine: Engine, player: Player, zombies: Zombie[], noise: NoiseSystem, night: boolean) {
+    this.engine = engine;
     this.player = player;
     this.zombies = zombies;
     this.noise = noise;
     this.night = night;
+    const r = engine.renderer;
     if (player.canListen) {
-      this.bar = scene.add.graphics().setScrollFactor(0).setDepth(50);
-      scene.add.text(BAR_X, BAR_Y - 4, 'LISTEN  Q', {
-        fontFamily: 'Georgia, serif', fontSize: '16px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
-      }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
-    }
-    const cam = scene.cameras.main;
-    if (cam.postFX) {
-      this.grey = cam.postFX.addColorMatrix(); // identity until Listen Mode
+      this.bar = r.CreateShape().SetFixed().SetDepth(50);
+      r.CreateText(BAR_X, BAR_Y - 4, 'LISTEN  Q', Serif(16, 'bold', undefined, 4)).SetOrigin(0, 1).SetFixed().SetDepth(50);
     }
     if (!night) return;
-    makeLightTexture(scene, 'light_player', LIGHT_RADIUS * TILE);
-    makeLightTexture(scene, 'light_click', CLICK_RADIUS * TILE);
-    this.darkness = scene.add.renderTexture(0, 0, scene.scale.width, scene.scale.height)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_NIGHT);
-    this.lightImg = scene.make.image({ key: 'light_player' }, false);
-    this.clickImg = scene.make.image({ key: 'light_click' }, false);
-  }
-
-  destroy(): void {
-    if (this.lightImg) this.lightImg.destroy();
-    if (this.clickImg) this.clickImg.destroy();
+    MakeLightTexture(engine, LIGHT_PLAYER, LIGHT_RADIUS * TILE);
+    MakeLightTexture(engine, LIGHT_CLICK, CLICK_RADIUS * TILE);
+    this.darkness = r.CreateCanvas(0, 0, engine.width, engine.height).SetFixed().SetDepth(DEPTH_NIGHT);
   }
 
   /** Once per frame, after the camera moved. */
-  update(deltaMs: number): void {
-    const dt = deltaMs / 1000;
-    this.updateListen();
-    this.drawBar();
-    if (!this.night || !this.darkness || !this.lightImg || !this.clickImg) return;
-    this.updateClicks(dt);
-    this.updateWeather(dt);
+  Update(dt: number): void {
+    this.UpdateListen();
+    this.DrawBar();
+    if (!this.night || !this.darkness) return;
+    this.UpdateClicks(dt);
+    this.UpdateWeather(dt);
 
-    const cam = this.scene.cameras.main;
-    const flash = this.flashAge >= 0 ? flashAt(this.flashAge) : 0;
-    const rt = this.darkness;
-    rt.clear();
-    rt.fill(0x04050a, DARKNESS * (1 - flash));
-    rt.erase(this.lightImg, this.player.feetX - cam.scrollX, this.player.feetY - TILE * 0.9 - cam.scrollY);
+    const cam = this.engine.camera;
+    const flash = this.flashAge >= 0 ? FlashAt(this.flashAge) : 0;
+    const night = this.darkness;
+    night.Clear();
+    night.Fill(0x04050a, DARKNESS * (1 - flash));
+    night.Erase(LIGHT_PLAYER, this.player.feetX - cam.scrollX, this.player.feetY - TILE * 0.9 - cam.scrollY);
     for (let i = 0; i < this.clicks.length; i++) {
       const c = this.clicks[i];
-      this.clickImg.setAlpha(1 - c.age / CLICK_TIME);
-      rt.erase(this.clickImg, c.x - cam.scrollX, c.y - cam.scrollY);
+      night.Erase(LIGHT_CLICK, c.x - cam.scrollX, c.y - cam.scrollY, 1 - c.age / CLICK_TIME);
     }
   }
 
-  private updateClicks(dt: number): void {
+  private UpdateClicks(dt: number): void {
     for (let i = this.clicks.length - 1; i >= 0; i--) {
       this.clicks[i].age += dt;
       if (this.clicks[i].age >= CLICK_TIME) this.clicks.splice(i, 1);
@@ -136,7 +119,7 @@ export class Blackout {
     }
   }
 
-  private updateWeather(dt: number): void {
+  private UpdateWeather(dt: number): void {
     if (this.flashAge >= 0) {
       this.flashAge += dt;
       if (this.flashAge > FLASH_KEYS[FLASH_KEYS.length - 1][0]) this.flashAge = -1;
@@ -144,7 +127,7 @@ export class Blackout {
     if (this.thunderTimer >= 0) {
       this.thunderTimer -= dt;
       if (this.thunderTimer < 0) { // the thunder: footsteps are drowned out for a moment
-        this.scene.cameras.main.shake(500, 0.004);
+        this.engine.camera.Shake(0.5, 0.004);
         this.noise.maskTimer = THUNDER_MASK;
       }
     }
@@ -157,48 +140,42 @@ export class Blackout {
   }
 
   /** Listen Mode: grey world + white silhouettes of every infected in range, above walls and night. */
-  private updateListen(): void {
+  private UpdateListen(): void {
     const on = this.player.listening;
-    // The colour matrix stays on the camera; Listen sets it to grey, releasing resets it to identity
-    // (the FX's `active` flag does not stop a camera post effect: colours stayed grey after letting go).
-    if (this.grey && on !== this.greyOn) {
-      this.greyOn = on;
-      if (on) this.grey.grayscale(1);
-      else this.grey.reset();
-    }
+    this.engine.camera.SetGrayscale(on);
     let used = 0;
     if (on) {
       const range = LISTEN_RANGE * TILE;
-      const pulse = 0.75 + Math.sin(this.scene.time.now / 160) * 0.2;
+      const pulse = 0.75 + Math.sin(this.engine.clock.nowMs / 160) * 0.2;
       for (let i = 0; i < this.zombies.length; i++) {
         const z = this.zombies[i];
         if (!z.alive || Math.abs(z.feetX - this.player.feetX) > range || Math.abs(z.feetY - this.player.feetY) > range) continue;
+        const v = z.view;
         if (used === this.ghosts.length) {
-          this.ghosts.push(this.scene.add.sprite(0, 0, z.view.texture.key).setOrigin(0.5, 1).setDepth(45).setTintFill(0xffffff));
+          this.ghosts.push(this.engine.renderer.CreateSprite(0, 0, v.textureKey).SetOrigin(0.5, 1).SetDepth(45).SetTintFill(0xffffff));
         }
         const g = this.ghosts[used++];
-        const v = z.view;
-        g.setTexture(v.texture.key, v.frame.name).setPosition(v.x, v.y).setFlipX(v.flipX).setScale(v.scaleX, v.scaleY)
-          .setAlpha(pulse).setVisible(true);
+        g.SetTexture(v.textureKey, v.frame).SetPosition(v.x, v.y).SetFlipX(v.flipX).SetScale(v.scaleX, v.scaleY)
+          .SetAlpha(pulse).SetVisible(true);
       }
     }
-    for (let i = used; i < this.ghosts.length; i++) this.ghosts[i].setVisible(false);
+    for (let i = used; i < this.ghosts.length; i++) this.ghosts[i].SetVisible(false);
   }
 
   /** Listen charge: blue while usable, red while recharging after running dry. */
-  private drawBar(): void {
+  private DrawBar(): void {
     if (!this.bar) return;
     const p = this.player;
     const g = this.bar;
-    g.clear();
-    g.fillStyle(0x000000, 0.65).fillRect(BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6);
-    g.fillStyle(p.listenExhausted ? BAR_EMPTY : BAR_READY, p.listening ? 1 : 0.85);
-    g.fillRect(BAR_X, BAR_Y, BAR_W * p.listenEnergy, BAR_H);
+    g.Clear();
+    g.FillStyle(0x000000, 0.65).FillRect(BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6);
+    g.FillStyle(p.listenExhausted ? BAR_EMPTY : BAR_READY, p.listening ? 1 : 0.85);
+    g.FillRect(BAR_X, BAR_Y, BAR_W * p.listenEnergy, BAR_H);
   }
 }
 
 /** Brightness of the lightning `age` s after the strike (piecewise linear between FLASH_KEYS). */
-function flashAt(age: number): number {
+function FlashAt(age: number): number {
   for (let i = 1; i < FLASH_KEYS.length; i++) {
     const a = FLASH_KEYS[i - 1];
     const b = FLASH_KEYS[i];
@@ -208,17 +185,14 @@ function flashAt(age: number): number {
 }
 
 /** A white disc that fades to transparent at its edge: erasing it from the night makes a soft light. */
-function makeLightTexture(scene: Phaser.Scene, key: string, radius: number): void {
-  if (scene.textures.exists(key)) return;
+function MakeLightTexture(engine: Engine, key: string, radius: number): void {
   const size = Math.ceil(radius * 2);
-  const tex = scene.textures.createCanvas(key, size, size);
-  if (!tex) return;
-  const ctx = tex.getContext();
-  const grad = ctx.createRadialGradient(radius, radius, 0, radius, radius, radius);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.55, 'rgba(255,255,255,0.85)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  tex.refresh();
+  engine.assets.CreateCanvasTexture(key, size, size, (ctx) => {
+    const grad = ctx.createRadialGradient(radius, radius, 0, radius, radius, radius);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.55, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  });
 }

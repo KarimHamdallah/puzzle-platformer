@@ -15,9 +15,9 @@
  *   Q  concrete block (cover that never breaks)   Y  army ammo crate (the smoke grenades, M2 Medium)
  */
 
-import type { HeliDef } from './Helicopter';
-import { SniperKind, type SniperDef } from './Sniper';
-import { Part, Upgrade } from './Upgrades';
+import type { HeliDef } from '../entities/Helicopter';
+import { SniperKind, type SniperDef } from '../entities/Sniper';
+import { Part, Upgrade } from '../systems/Upgrades';
 
 /** Coloured keys (Medium): the car trunk's three padlocks. */
 export enum KeyColor {
@@ -34,7 +34,7 @@ export interface KeyGroup {
 }
 
 /**
- * What a death must not undo (passed through scene.restart): coloured keys, the Molotov story.
+ * What a death must not undo (passed to the restarted level): coloured keys, the Molotov story.
  * Zombies whose key already dropped stay dead; a dropped key lies where it fell until picked up.
  */
 export class LevelProgress {

@@ -1,6 +1,6 @@
 """
 Builds MECHANIC 3 EASY's ASCII map (scavenge & upgrade: the spring boots), printed as a TypeScript
-array to paste into src/game/Levels.ts (M3_EASY_MAP).
+array to paste into src/game/levels/Levels.ts (M3_EASY_MAP).
 
 You start at the workbench, under a cliff too high to jump (5 tiles; a jump is 3.2). The bench shows
 a sketch: boots on springs = a double jump, from 2 springs and a leather strap. The parts are west:

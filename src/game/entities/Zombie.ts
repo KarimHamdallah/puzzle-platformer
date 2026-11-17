@@ -1,8 +1,10 @@
-import Phaser from 'phaser';
 import type GUI from 'lil-gui';
-import { TuningFolder, debug } from '../core/Debug';
-import { ART_SCALE, TILE } from './constants';
-import { NoiseKind, type Noise, type NoiseSystem } from './Noise';
+import {
+  BodyType, Rect, TuningFolder, Vec2, debugPanel,
+  type Animator, type Body, type Engine, type Shape, type Sprite, type Text,
+} from '../../engine';
+import { ART_SCALE, Serif, TILE } from '../constants';
+import { NoiseKind, type Noise, type NoiseSystem } from '../systems/Noise';
 import type { Player } from './Player';
 
 /**
@@ -21,14 +23,17 @@ import type { Player } from './Player';
  *                              turns toward noises, sees through line of sight only. If she sees you, a
  *                              bottle hits her or you punch her from the front, she screams: Clickers
  *                              come to her, Runners start chasing, and her FIRST scream of each alert
- *                              brings SCREAM_SUMMONS fresh Runners sprinting in from off-screen (the scene
+ *                              brings SCREAM_SUMMONS fresh Runners sprinting in from off-screen (the level
  *                              spawns them). Silent takedown from behind only.
  *
  * Horde Clickers (`feeding`) eat at the corpses: they hear the player only within HORDE_HEARING tiles,
- * still follow bottles, and return to the pile. ignite() burns any zombie (Molotov).
+ * still follow bottles, and return to the pile. Ignite() burns any zombie (Molotov).
  *
  * Icons over heads: "?" = searching / suspicious, red "!!" = it found you, pulsing gold "!" = a Clicker
  * busy with a distraction: the only moment it can be taken down (from behind).
+ *
+ * Physics: each zombie applies its own gravity at the end of FixedUpdate (like the player), the
+ * physics step then moves it and stops it on floors and walls.
  */
 export enum ZombieKind {
   Clicker,
@@ -36,7 +41,7 @@ export enum ZombieKind {
   Screamer,
 }
 
-enum ZombieState {
+export enum ZombieState {
   Post, // standing at its post (Screamer: looking around)
   Patrol, // walking back and forth, turning at walls and ledges
   Investigate, // Clicker: walking to a distraction (bottle / scream)
@@ -50,6 +55,13 @@ enum ZombieState {
   Grab, // caught the player
   Burning, // set on fire (Molotov): harmless, flailing, then dead
   Dead,
+}
+
+export enum MeleeResult {
+  None,
+  Hit,
+  Takedown,
+  Grab,
 }
 
 class ZombieTuning {
@@ -82,7 +94,7 @@ const T = new ZombieTuning();
 interface KindInfo {
   w: number; // hitbox, tiles
   h: number;
-  idle: string; // animation keys (see Assets.ts)
+  idle: string; // animation clips (see Assets.ts)
   walk: string;
   fast: string;
   alert: string;
@@ -101,6 +113,7 @@ const KINDS: KindInfo[] = [
     grab: 'zombie_woman_scream', hurt: 'zombie_woman_idle', dead: 'zombie_woman_dead', jump: 'zombie_woman_idle' },
 ];
 
+const MAX_FALL = 30; // tiles/s: above any jump speed (a 3.3-tile Runner jump needs 16.2)
 const PROBE = 2; // px size of the wall / ledge probes
 const ARRIVE = 0.25; // tiles: close enough to a target x
 const CONTACT_INSET = 6; // px: contact needs real overlap, not a grazing touch
@@ -116,30 +129,28 @@ const ICON_COLOR = '#f0e6c8';
 const ICON_ALERT_COLOR = '#ff5a48';
 const ICON_TAKEDOWN_COLOR = '#ffd24a';
 
-export type MeleeResult = 'none' | 'hit' | 'takedown' | 'grab';
-
 export class Zombie {
   readonly kind: ZombieKind;
-  readonly body: Phaser.Physics.Arcade.Body;
+  readonly body: Body;
   state: ZombieState;
   dir: number; // +1 right, -1 left
   targetX = 0; // Investigate / Hunt / Chase / Return destination
   health: number;
   distracted = false; // Clicker: busy with a bottle / scream (the only time it can be taken down)
-  hasKey = false; // guardian: drops the key of a locked door when it dies (the scene drops it)
+  hasKey = false; // guardian: drops the key of a locked door when it dies (the level drops it)
   patrolRange = 0; // tiles either side of home it paces (0: walks until a wall or a ledge)
-  summons = 0; // Screamer: Runners her scream just called in (the scene spawns them and resets this)
+  summons = 0; // Screamer: Runners her scream just called in (the level spawns them and resets this)
   feeding = false; // horde Clicker: eats at its post, hears the player only up close
 
-  private readonly scene: Phaser.Scene;
-  private readonly physics: Phaser.Physics.Arcade.ArcadePhysics;
-  private fire: Phaser.GameObjects.Sprite | null = null; // while burning
+  private readonly engine: Engine;
+  private fire: Sprite | null = null; // while burning
   private burnDelay = 0; // s before the flames reach it
   private burnTime = 0;
   private suppressed = 0; // s left pinned down by machine-gun fire: frozen, flinching, harmless
-  private readonly sprite: Phaser.GameObjects.Sprite;
-  private readonly icon: Phaser.GameObjects.Text;
-  private readonly fx: Phaser.GameObjects.Graphics; // dizzy stars
+  private readonly sprite: Sprite;
+  private readonly anim: Animator;
+  private readonly icon: Text;
+  private readonly fx: Shape; // dizzy stars
   private readonly info: KindInfo;
   private readonly patrols: boolean;
   private readonly homeX: number;
@@ -152,46 +163,41 @@ export class Zombie {
   private summoned = false; // Screamer: this alert already called its Runners
   private restartAnim = false;
 
-  constructor(scene: Phaser.Scene, kind: ZombieKind, feetX: number, feetY: number, dir: number, patrols: boolean) {
+  constructor(engine: Engine, kind: ZombieKind, feetX: number, feetY: number, dir: number, patrols: boolean) {
+    this.engine = engine;
     this.kind = kind;
     this.info = KINDS[kind];
     this.dir = dir;
     this.homeDir = dir;
     this.homeX = feetX;
     this.patrols = patrols;
-    this.scene = scene;
-    this.physics = scene.physics;
     this.health = kind === ZombieKind.Runner ? T.runnerHealth : 1;
     this.state = patrols ? ZombieState.Patrol : ZombieState.Post;
     this.lookTimer = T.screamerLookTime;
 
     const w = this.info.w * TILE;
     const h = this.info.h * TILE;
-    this.body = scene.physics.add.body(feetX - w / 2, feetY - h, w, h);
-    this.body.setAllowGravity(true);
-    // Arcade clamps BOTH directions with maxVelocity. 15 tiles/s capped the Runner's jump at 2.81 tiles
-    // (a 3.3-tile jump needs 16.2): it got stuck under every 3-tile block. Cap above any jump speed.
-    this.body.setMaxVelocityY(30 * TILE);
+    this.body = engine.physics.CreateBody({ type: BodyType.Dynamic, x: feetX - w / 2, y: feetY - h, w: w, h: h, gravityScale: 0, userData: this });
 
-    this.sprite = scene.add.sprite(feetX, feetY, this.info.idle, 0).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(8);
-    this.sprite.play(this.info.idle);
-    this.icon = scene.add.text(feetX, feetY, '', {
-      fontFamily: 'Georgia, serif', fontSize: '44px', fontStyle: 'bold', color: '#ffe066', stroke: '#000000', strokeThickness: 7,
-    }).setOrigin(0.5, 1).setDepth(25);
-    this.fx = scene.add.graphics().setDepth(25);
+    const r = engine.renderer;
+    this.sprite = r.CreateSprite(feetX, feetY, this.info.idle).SetOrigin(0.5, 1).SetScale(ART_SCALE).SetDepth(8);
+    this.anim = engine.animations.Create(this.sprite);
+    this.anim.Play(this.info.idle);
+    this.icon = r.CreateText(feetX, feetY, '', Serif(44, 'bold', '#ffe066', 7)).SetOrigin(0.5, 1).SetDepth(25);
+    this.fx = r.CreateShape().SetDepth(25);
   }
 
   get feetX(): number {
-    return this.body.center.x;
-  }
-
-  /** The sprite, for effects that copy its look (Listen Mode silhouettes). */
-  get view(): Phaser.GameObjects.Sprite {
-    return this.sprite;
+    return this.body.centerX;
   }
 
   get feetY(): number {
     return this.body.bottom;
+  }
+
+  /** The sprite, for effects that copy its look (Listen Mode silhouettes). */
+  get view(): Sprite {
+    return this.sprite;
   }
 
   get stateName(): string {
@@ -217,140 +223,150 @@ export class Zombie {
       && this.suppressed <= 0;
   }
 
+  /** Where it hears and sees from: 80% up its body. */
+  Head(): Vec2 {
+    return new Vec2(this.feetX, this.feetY - this.body.height * 0.8);
+  }
+
   /** Real overlap with the player's body (a few px of grace on every side). */
-  touches(p: Phaser.Physics.Arcade.Body): boolean {
+  Touches(p: Body): boolean {
     const b = this.body;
     return p.right - CONTACT_INSET > b.left && p.left + CONTACT_INSET < b.right
       && p.bottom - CONTACT_INSET > b.top && p.top + CONTACT_INSET < b.bottom;
   }
 
-  grab(): void {
-    this.setState(ZombieState.Grab);
-    this.body.setVelocityX(0);
-    this.showIcon('', 0);
+  Grab(): void {
+    this.SetState(ZombieState.Grab);
+    this.body.velocity.x = 0;
+    this.ShowIcon('', 0);
   }
 
   /** The player landed on this zombie's head. Runner: dizzy. Returns true if it was a valid stomp. */
-  stomped(): boolean {
+  Stomped(): boolean {
     if (this.kind !== ZombieKind.Runner || !this.alive) return false;
-    this.stun();
+    this.Stun();
     return true;
   }
 
   /** A thrown bottle hit this zombie (the bottle also shatters and makes its noise). */
-  hitByBottle(): void {
+  HitByBottle(): void {
     if (!this.alive) return;
-    if (this.kind === ZombieKind.Runner) this.stun();
-    else if (this.kind === ZombieKind.Screamer) this.startScreaming();
+    if (this.kind === ZombieKind.Runner) this.Stun();
+    else if (this.kind === ZombieKind.Screamer) this.StartScreaming();
   }
 
   /** The player's punch connected. `fromX` = attacker's x, to know "from behind". */
-  meleeHit(fromX: number): MeleeResult {
-    if (!this.alive) return 'none';
+  MeleeHit(fromX: number): MeleeResult {
+    if (!this.alive) return MeleeResult.None;
     const fromBehind = (fromX - this.feetX) * this.dir < 0;
 
     if (this.kind === ZombieKind.Runner) {
-      if (this.state !== ZombieState.Stunned) return 'none';
+      if (this.state !== ZombieState.Stunned) return MeleeResult.None;
       this.health--;
-      this.body.setVelocityX(Math.sign(this.feetX - fromX) * TILE);
+      this.body.velocity.x = Math.sign(this.feetX - fromX) * TILE;
       this.timer = Math.max(this.timer, PUNCH_KEEPS_DIZZY);
-      if (this.health <= 0) this.die();
-      return 'hit';
+      if (this.health <= 0) this.Die();
+      return MeleeResult.Hit;
     }
     if (this.kind === ZombieKind.Clicker) {
       if (this.takedownWindow && fromBehind) {
-        this.die();
-        return 'takedown';
+        this.Die();
+        return MeleeResult.Takedown;
       }
-      return 'grab'; // not busy, or from the front: it gets you
+      return MeleeResult.Grab; // not busy, or from the front: it gets you
     }
     // Screamer
     if (this.state !== ZombieState.Alert && fromBehind) {
-      this.die();
-      return 'takedown';
+      this.Die();
+      return MeleeResult.Takedown;
     }
-    this.startScreaming();
-    return 'none';
+    this.StartScreaming();
+    return MeleeResult.None;
   }
 
-  /** Behaviour, at the physics rate. */
-  fixedUpdate(dt: number, player: Player, noise: NoiseSystem): void {
-    const b = this.body;
-    b.gravity.y = T.gravity * TILE; // read every step so the slider applies live
+  /** Behaviour, at the physics rate, then gravity (the physics step moves the body after this). */
+  FixedUpdate(dt: number, player: Player, noise: NoiseSystem): void {
+    this.Behave(dt, player, noise);
+    const v = this.body.velocity;
+    v.y = Math.min(v.y + T.gravity * TILE * dt, MAX_FALL * TILE); // T is read every step: the slider applies live
+  }
+
+  private Behave(dt: number, player: Player, noise: NoiseSystem): void {
+    const v = this.body.velocity;
     this.iconTimer = Math.max(0, this.iconTimer - dt);
     if (this.state === ZombieState.Dead || this.state === ZombieState.Grab) {
-      if (this.onGround()) b.setVelocityX(0);
+      if (this.OnGround()) v.x = 0;
       return;
     }
     if (this.suppressed > 0) { // under fire: it can't move, hear or grab anyone; you can run past it
       this.suppressed -= dt;
-      b.setVelocityX(0);
+      v.x = 0;
       return;
     }
     if (this.state === ZombieState.Burning) {
-      b.setVelocityX(0);
+      v.x = 0;
       if (this.burnDelay > 0) { // the fire is still spreading toward it
         this.burnDelay -= dt;
-        if (this.burnDelay <= 0) this.catchFire();
+        if (this.burnDelay <= 0) this.CatchFire();
         return;
       }
       this.burnTime -= dt;
-      if (this.burnTime <= 0) this.die();
+      if (this.burnTime <= 0) this.Die();
       return;
     }
-    if (this.kind === ZombieKind.Clicker) this.clicker(dt, player, noise);
-    else if (this.kind === ZombieKind.Runner) this.runner(dt, player, noise);
-    else this.screamer(dt, player, noise);
+    if (this.kind === ZombieKind.Clicker) this.Clicker(dt, player, noise);
+    else if (this.kind === ZombieKind.Runner) this.Runner(dt, player, noise);
+    else this.Screamer(dt, player, noise);
   }
 
   /** Set on fire after `delay` s (the flames spread from the Molotov's impact). */
-  ignite(delay: number): void {
+  Ignite(delay: number): void {
     if (!this.alive || this.state === ZombieState.Burning) return;
     this.state = ZombieState.Burning;
     this.burnDelay = delay;
     this.burnTime = BURN_TIME;
     this.distracted = false;
-    this.body.setVelocityX(0);
-    this.showIcon('', 0);
-    if (delay <= 0) this.catchFire();
+    this.body.velocity.x = 0;
+    this.ShowIcon('', 0);
+    if (delay <= 0) this.CatchFire();
   }
 
-  private catchFire(): void {
-    this.fire = this.scene.add.sprite(this.feetX, this.feetY + 6, 'fire').setOrigin(0.5, 1).setScale(FIRE_SCALE).setDepth(9);
-    this.fire.play({ key: 'fire', startFrame: Math.floor(Math.random() * 8) });
+  private CatchFire(): void {
+    this.fire = this.engine.renderer.CreateSprite(this.feetX, this.feetY + 6, 'fire').SetOrigin(0.5, 1).SetScale(FIRE_SCALE).SetDepth(9);
+    this.engine.animations.Create(this.fire).Play('fire', false, Math.floor(Math.random() * 8));
     this.restartAnim = true;
   }
 
   /** Visuals, once per rendered frame. */
-  update(timeMs: number): void {
-    this.sprite.setPosition(this.feetX, this.feetY);
-    this.sprite.setFlipX(this.dir < 0);
+  Update(timeMs: number): void {
+    this.sprite.SetPosition(this.feetX, this.feetY);
+    this.sprite.SetFlipX(this.dir < 0);
     if (this.fire) {
-      this.fire.setPosition(this.feetX, this.feetY + 6);
-      if (this.state === ZombieState.Burning) this.sprite.setTint((Math.floor(timeMs / 70) % 2) === 0 ? 0xff9a60 : 0xffc890); // flicker
+      this.fire.SetPosition(this.feetX, this.feetY + 6);
+      if (this.state === ZombieState.Burning) this.sprite.SetTint((Math.floor(timeMs / 70) % 2) === 0 ? 0xff9a60 : 0xffc890); // flicker
     }
     const headY = this.feetY - this.body.height;
     // The takedown window overrides the timed icons with a pulsing gold "!".
     const takedown = this.takedownWindow;
     const text = takedown ? '!' : this.iconText;
-    if (this.icon.text !== text) this.icon.setText(text).setColor(text === '!' ? ICON_TAKEDOWN_COLOR : text === ICON_ALERT ? ICON_ALERT_COLOR : ICON_COLOR);
-    this.icon.setPosition(this.feetX, headY - 6 + (takedown ? Math.sin(timeMs / 200) * 6 : 0));
-    this.icon.setScale(takedown ? 1 + Math.sin(timeMs / 140) * 0.1 : 1);
-    this.icon.setVisible(this.alive && (takedown || this.iconTimer > 0));
+    if (this.icon.text !== text) this.icon.SetText(text).SetColor(text === '!' ? ICON_TAKEDOWN_COLOR : text === ICON_ALERT ? ICON_ALERT_COLOR : ICON_COLOR);
+    this.icon.SetPosition(this.feetX, headY - 6 + (takedown ? Math.sin(timeMs / 200) * 6 : 0));
+    this.icon.SetScale(takedown ? 1 + Math.sin(timeMs / 140) * 0.1 : 1);
+    this.icon.SetVisible(this.alive && (takedown || this.iconTimer > 0));
 
-    this.fx.clear();
+    this.fx.Clear();
     if (this.state === ZombieState.Stunned) { // three stars orbiting the head
-      this.fx.fillStyle(0xffe066, 1);
+      this.fx.FillStyle(0xffe066, 1);
       for (let i = 0; i < 3; i++) {
         const a = timeMs / 180 + (i * Math.PI * 2) / 3;
-        this.fx.fillCircle(this.feetX + Math.cos(a) * 26, headY - 10 + Math.sin(a) * 8, 6);
+        this.fx.FillCircle(this.feetX + Math.cos(a) * 26, headY - 10 + Math.sin(a) * 8, 6);
       }
     }
 
     let anim = this.info.idle;
     const moving = Math.abs(this.body.velocity.x) > 1;
-    if (this.suppressed > 0 && this.alive) this.sprite.setTint((Math.floor(timeMs / 50) % 2) === 0 ? 0xffffff : 0xffb0a0);
-    else if (this.alive && this.state !== ZombieState.Burning) this.sprite.clearTint();
+    if (this.suppressed > 0 && this.alive) this.sprite.SetTint((Math.floor(timeMs / 50) % 2) === 0 ? 0xffffff : 0xffb0a0);
+    else if (this.alive && this.state !== ZombieState.Burning) this.sprite.ClearTint();
     switch (this.state) {
       case ZombieState.Dead: anim = this.info.dead; break;
       case ZombieState.Burning: anim = this.fire ? this.info.hurt : this.feeding ? FEED_ANIM : this.info.idle; break;
@@ -363,32 +379,32 @@ export class Zombie {
       case ZombieState.Chase: anim = moving ? this.info.fast : this.info.idle; break;
       default: anim = moving ? this.info.walk : this.info.idle;
     }
-    if (this.kind === ZombieKind.Runner && !this.onGround() && this.state === ZombieState.Chase) anim = this.info.jump;
+    if (this.kind === ZombieKind.Runner && !this.OnGround() && this.state === ZombieState.Chase) anim = this.info.jump;
     if (this.restartAnim) {
-      this.sprite.play(anim);
+      this.anim.Play(anim);
       this.restartAnim = false;
     } else if (this.state !== ZombieState.Dead && this.state !== ZombieState.Grab) {
-      // play(anim, true) only skips an animation that is still PLAYING: a finished one-shot (death,
-      // grab) would restart every frame. Those are started once by setState() and then left alone.
-      this.sprite.play(anim, true);
+      // Play(anim, true) only skips a clip that is still PLAYING: a finished one-shot (death, grab)
+      // would restart every frame. Those are started once by SetState() and then left alone.
+      this.anim.Play(anim, true);
     }
   }
 
   // ---------------------------------------------------------------- Clicker
 
-  private clicker(dt: number, player: Player, noise: NoiseSystem): void {
-    const b = this.body;
-    const lure = this.lastHeard(noise, true);
-    const steps = this.lastHeard(noise, false, false, this.feeding ? HORDE_HEARING : Infinity);
-    const sensed = !this.distracted && this.senses(player);
+  private Clicker(dt: number, player: Player, noise: NoiseSystem): void {
+    const v = this.body.velocity;
+    const lure = this.LastHeard(noise, true);
+    const steps = this.LastHeard(noise, false, false, this.feeding ? HORDE_HEARING : Infinity);
+    const sensed = !this.distracted && this.Senses(player);
 
     if (lure) { // bottle / scream: go and listen there
       this.targetX = lure.x;
       this.state = ZombieState.Investigate;
       this.distracted = true;
-      this.showIcon('', 0); // the takedown "!" takes over
+      this.ShowIcon('', 0); // the takedown "!" takes over
     } else if (steps || sensed) { // your footsteps, or you are right next to it: hunt you
-      if (this.state !== ZombieState.Hunt) this.showIcon(ICON_ALERT, 0.8);
+      if (this.state !== ZombieState.Hunt) this.ShowIcon(ICON_ALERT, 0.8);
       this.state = ZombieState.Hunt;
       this.distracted = false;
       this.targetX = steps ? steps.x : player.feetX;
@@ -397,24 +413,24 @@ export class Zombie {
 
     switch (this.state) {
       case ZombieState.Post:
-        b.setVelocityX(0);
+        v.x = 0;
         break;
       case ZombieState.Patrol:
-        this.patrol(dt, T.clickerSpeed, T.clickerPause);
+        this.Patrol(dt, T.clickerSpeed, T.clickerPause);
         break;
       case ZombieState.Investigate:
-        if (this.walkTo(this.targetX, T.investigateSpeed)) this.startSearch();
+        if (this.WalkTo(this.targetX, T.investigateSpeed)) this.StartSearch();
         break;
       case ZombieState.Hunt:
-        this.walkTo(this.targetX, T.huntSpeed);
+        this.WalkTo(this.targetX, T.huntSpeed);
         this.timer -= dt;
         if (this.timer <= 0) {
           this.distracted = false;
-          this.startSearch();
+          this.StartSearch();
         }
         break;
       case ZombieState.Search:
-        b.setVelocityX(0);
+        v.x = 0;
         this.timer -= dt;
         if (!this.distracted) { // looking for you: turns around; listening to a lure: keeps facing it
           this.lookTimer -= dt;
@@ -429,7 +445,7 @@ export class Zombie {
         }
         break;
       case ZombieState.Return:
-        if (this.walkTo(this.homeX, T.clickerSpeed)) {
+        if (this.WalkTo(this.homeX, T.clickerSpeed)) {
           this.dir = this.homeDir;
           this.state = this.patrols ? ZombieState.Patrol : ZombieState.Post;
         }
@@ -437,53 +453,53 @@ export class Zombie {
     }
   }
 
-  private startSearch(): void {
+  private StartSearch(): void {
     this.state = ZombieState.Search;
     this.timer = T.searchTime;
     this.lookTimer = 0.9;
-    this.showIcon('?', T.searchTime);
+    this.ShowIcon('?', T.searchTime);
   }
 
   /** Clicker's close-range sense: all around, works on a sneaking player, not on a hidden one. */
-  private senses(player: Player): boolean {
+  private Senses(player: Player): boolean {
     if (player.hidden || player.dead) return false;
-    const headY = this.feetY - this.body.height * 0.5;
-    const py = player.feetY - player.body.height * 0.5;
-    return Phaser.Math.Distance.Between(this.feetX, headY, player.feetX, py) <= T.clickerSense * TILE;
+    const me = new Vec2(this.feetX, this.feetY - this.body.height * 0.5);
+    const you = new Vec2(player.feetX, player.feetY - player.body.height * 0.5);
+    return me.DistanceTo(you) <= T.clickerSense * TILE;
   }
 
   // ---------------------------------------------------------------- Runner
 
-  private runner(dt: number, player: Player, noise: NoiseSystem): void {
-    const b = this.body;
+  private Runner(dt: number, player: Player, noise: NoiseSystem): void {
+    const v = this.body.velocity;
     if (this.state === ZombieState.Stunned) {
-      if (this.onGround()) b.setVelocityX(b.velocity.x * 0.8);
+      if (this.OnGround()) v.x *= 0.8;
       this.timer -= dt;
       if (this.timer <= 0) {
         this.state = ZombieState.Chase;
         this.targetX = player.feetX;
         this.timer = T.runnerLoseTime;
-        this.showIcon(ICON_ALERT, 0.8);
+        this.ShowIcon(ICON_ALERT, 0.8);
       }
       return;
     }
 
-    const scream = this.lastHeard(noise, true, true);
+    const scream = this.LastHeard(noise, true, true);
     if (scream && this.state !== ZombieState.Chase) {
-      this.chase(scream.x);
-    } else if (this.state !== ZombieState.Chase && this.runnerSees(player, true)) {
-      this.chase(player.feetX);
+      this.Chase(scream.x);
+    } else if (this.state !== ZombieState.Chase && this.RunnerSees(player, true)) {
+      this.Chase(player.feetX);
     }
 
     switch (this.state) {
       case ZombieState.Patrol:
-        this.patrol(dt, T.runnerPatrolSpeed, T.runnerPause);
+        this.Patrol(dt, T.runnerPatrolSpeed, T.runnerPause);
         break;
       case ZombieState.Return:
-        if (this.walkTo(this.homeX, T.runnerPatrolSpeed)) this.state = ZombieState.Patrol;
+        if (this.WalkTo(this.homeX, T.runnerPatrolSpeed)) this.state = ZombieState.Patrol;
         break;
       case ZombieState.Chase: {
-        if (this.runnerSees(player, false)) {
+        if (this.RunnerSees(player, false)) {
           this.targetX = player.feetX; // only what it can SEE: hiding sends it to your last seen spot
           this.timer = T.runnerLoseTime;
         } else {
@@ -491,69 +507,69 @@ export class Zombie {
         }
         if (this.timer <= 0) {
           this.state = ZombieState.Return;
-          this.showIcon('?', 1);
+          this.ShowIcon('?', 1);
           break;
         }
-        // In the air: never push into a wall. Pressing diagonally into a block's side makes Arcade
-        // resolve the overlap vertically and push the Runner back down: it jumped every step and never
-        // rose. So it rises straight up beside the wall and moves on once its feet clear the top.
-        if (!this.onGround()) {
-          b.setVelocityX(this.wallAhead() ? 0 : this.dir * T.runnerSpeed * TILE);
+        // In the air: never push into a wall; rise straight up beside it and move on once the feet
+        // clear the top.
+        if (!this.OnGround()) {
+          v.x = this.WallAhead() ? 0 : this.dir * T.runnerSpeed * TILE;
           break;
         }
         const dx = this.targetX - this.feetX;
         if (Math.abs(dx) <= ARRIVE * TILE) {
-          b.setVelocityX(0);
-          if (this.iconTimer <= 0) this.showIcon('?', 0.6); // lost you: looking around
+          v.x = 0;
+          if (this.iconTimer <= 0) this.ShowIcon('?', 0.6); // lost you: looking around
           break;
         }
         this.dir = Math.sign(dx);
-        const jumpSpeed = Math.sqrt(2 * T.gravity * TILE * T.runnerJump * TILE);
-        if (this.wallAhead()) b.setVelocity(0, -jumpSpeed); // straight up the wall
-        else if (!this.groundAhead()) b.setVelocity(this.dir * T.runnerSpeed * TILE, -jumpSpeed); // across a gap
-        else b.setVelocityX(this.dir * T.runnerSpeed * TILE);
+        const jumpSpeed = Math.sqrt(2 * T.gravity * TILE * T.runnerJump * TILE); // v² = 2·g·h
+        if (this.WallAhead()) v.Set(0, -jumpSpeed); // straight up the wall
+        else if (!this.GroundAhead()) v.Set(this.dir * T.runnerSpeed * TILE, -jumpSpeed); // across a gap
+        else v.x = this.dir * T.runnerSpeed * TILE;
         break;
       }
     }
   }
 
   /** Runner: run after x (seen player, scream, or summoned by a Screamer). */
-  chase(x: number): void {
-    this.showIcon(ICON_ALERT, 0.8);
+  Chase(x: number): void {
+    this.ShowIcon(ICON_ALERT, 0.8);
     this.state = ZombieState.Chase;
     this.targetX = x;
     this.timer = T.runnerLoseTime;
   }
 
-  private stun(): void {
-    this.setState(ZombieState.Stunned);
+  private Stun(): void {
+    this.SetState(ZombieState.Stunned);
     this.timer = T.stunTime;
-    this.body.setVelocityX(0);
-    this.showIcon('', 0);
+    this.body.velocity.x = 0;
+    this.ShowIcon('', 0);
   }
 
-  private runnerSees(player: Player, needFacing: boolean): boolean {
+  private RunnerSees(player: Player, needFacing: boolean): boolean {
     if (player.hidden || player.dead) return false;
     const dx = player.feetX - this.feetX;
     if (needFacing && dx * this.dir <= 0) return false;
     if (Math.abs(dx) > T.runnerSight * TILE || Math.abs(player.feetY - this.feetY) > 4 * TILE) return false;
-    return this.lineOfSight(player);
+    return this.LineOfSight(player);
   }
 
   // ---------------------------------------------------------------- Screamer
 
-  private screamer(dt: number, player: Player, noise: NoiseSystem): void {
-    this.body.setVelocityX(0);
+  private Screamer(dt: number, player: Player, noise: NoiseSystem): void {
+    this.body.velocity.x = 0;
     this.alertTimer -= dt;
 
-    if (this.sees(player) || this.alertTimer > 0) {
+    if (this.Sees(player) || this.alertTimer > 0) {
       if (this.state !== ZombieState.Alert) this.timer = 0; // first sight: scream immediately
       this.state = ZombieState.Alert;
       this.timer -= dt;
       if (this.timer <= 0) {
-        noise.emit(this.feetX, this.feetY - this.body.height * 0.8, T.screamNoise, NoiseKind.Scream);
+        const head = this.Head();
+        noise.Emit(head.x, head.y, T.screamNoise, NoiseKind.Scream);
         this.timer = T.screamInterval;
-        this.showIcon(ICON_ALERT, 0.8);
+        this.ShowIcon(ICON_ALERT, 0.8);
         if (!this.summoned) { // the first scream of this alert calls Runners in
           this.summoned = true;
           this.summons = SCREAM_SUMMONS;
@@ -567,12 +583,12 @@ export class Zombie {
       this.lookTimer = T.screamerLookTime;
     }
 
-    const heard = this.lastHeard(noise, false) ?? this.lastHeard(noise, true);
+    const heard = this.LastHeard(noise, false) ?? this.LastHeard(noise, true);
     if (heard) { // turns toward the sound and stares at it
       this.dir = Math.sign(heard.x - this.feetX) || this.dir;
       this.state = ZombieState.Distracted;
       this.timer = T.screamerDistractTime;
-      this.showIcon('?', 0.6);
+      this.ShowIcon('?', 0.6);
     }
     if (this.state === ZombieState.Distracted) {
       this.timer -= dt;
@@ -585,14 +601,14 @@ export class Zombie {
 
     // Look cycle: face one way for screamerLookTime, warn with "?", turn around.
     this.lookTimer -= dt;
-    if (this.lookTimer <= TURN_WARNING && this.iconTimer <= 0) this.showIcon('?', TURN_WARNING);
+    if (this.lookTimer <= TURN_WARNING && this.iconTimer <= 0) this.ShowIcon('?', TURN_WARNING);
     if (this.lookTimer <= 0) {
       this.dir = -this.dir;
       this.lookTimer = T.screamerLookTime;
     }
   }
 
-  private startScreaming(): void {
+  private StartScreaming(): void {
     if (!this.alive) return;
     this.state = ZombieState.Alert;
     this.alertTimer = 1.2;
@@ -600,25 +616,17 @@ export class Zombie {
   }
 
   /** Screamer sight: in front, in range, not hidden behind cover, nothing solid in between. */
-  sees(player: Player): boolean {
+  Sees(player: Player): boolean {
     if (player.hidden || player.dead || !this.alive) return false;
     const dx = player.feetX - this.feetX;
     if (dx * this.dir <= 0 || Math.abs(dx) > T.screamerSight * TILE) return false;
     if (Math.abs(player.feetY - this.feetY) > T.screamerSightHeight * TILE) return false;
-    return this.lineOfSight(player);
+    return this.LineOfSight(player);
   }
 
-  lineOfSight(player: Player): boolean {
-    const x0 = this.feetX;
-    const y0 = this.feetY - this.body.height * 0.8;
-    const x1 = player.feetX;
-    const y1 = player.feetY - player.body.height * 0.6;
-    const steps = Math.ceil(Phaser.Math.Distance.Between(x0, y0, x1, y1) / 12);
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      if (this.physics.overlapRect(x0 + (x1 - x0) * t - 1, y0 + (y1 - y0) * t - 1, 2, 2, false, true).length > 0) return false;
-    }
-    return true;
+  /** From its head to the player's chest: does the ray reach him before any wall? */
+  LineOfSight(player: Player): boolean {
+    return this.engine.physics.RayCast(this.Head(), SightTarget(player)) === null;
   }
 
   // ---------------------------------------------------------------- shared
@@ -629,8 +637,8 @@ export class Zombie {
    *  lures = false : the player's own noises (footsteps, landings, punches)
    * screamsOnly narrows lures to screams (Runners don't care about bottles).
    */
-  private lastHeard(noise: NoiseSystem, lures: boolean, screamsOnly: boolean = false, maxTiles: number = Infinity): Noise | null {
-    const headY = this.feetY - this.body.height * 0.8;
+  private LastHeard(noise: NoiseSystem, lures: boolean, screamsOnly: boolean = false, maxTiles: number = Infinity): Noise | null {
+    const head = this.Head();
     let found: Noise | null = null;
     for (let i = 0; i < noise.heard.length; i++) {
       const n = noise.heard[i];
@@ -638,191 +646,179 @@ export class Zombie {
       if (isLure !== lures) continue;
       if (screamsOnly && n.kind !== NoiseKind.Scream) continue;
       if (this.kind === ZombieKind.Screamer && n.kind === NoiseKind.Scream) continue; // her own voice
-      if (Phaser.Math.Distance.Between(n.x, n.y, this.feetX, headY) <= Math.min(n.radius, maxTiles * TILE)) found = n;
+      if (head.DistanceTo(new Vec2(n.x, n.y)) <= Math.min(n.radius, maxTiles * TILE)) found = n;
     }
     return found;
   }
 
-  private patrol(dt: number, speedTiles: number, pause: number): void {
-    const b = this.body;
+  private Patrol(dt: number, speedTiles: number, pause: number): void {
+    const v = this.body.velocity;
     if (this.timer > 0) {
       this.timer -= dt;
-      b.setVelocityX(0);
+      v.x = 0;
       return;
     }
     const tooFar = this.patrolRange > 0 && (this.feetX - this.homeX) * this.dir > this.patrolRange * TILE;
-    if (tooFar || (this.onGround() && (this.wallAhead() || !this.groundAhead()))) {
+    if (tooFar || (this.OnGround() && (this.WallAhead() || !this.GroundAhead()))) {
       this.dir = -this.dir;
       this.timer = pause;
-      b.setVelocityX(0);
+      v.x = 0;
       return;
     }
-    b.setVelocityX(this.dir * speedTiles * TILE);
+    v.x = this.dir * speedTiles * TILE;
   }
 
   /** Walk toward x on the current floor. True when arrived, or when a wall / ledge edge stops it. */
-  private walkTo(x: number, speedTiles: number): boolean {
-    const b = this.body;
+  private WalkTo(x: number, speedTiles: number): boolean {
+    const v = this.body.velocity;
     const dx = x - this.feetX;
     if (Math.abs(dx) <= ARRIVE * TILE) {
-      b.setVelocityX(0);
+      v.x = 0;
       return true;
     }
     this.dir = Math.sign(dx);
-    if (this.onGround() && (this.wallAhead() || !this.groundAhead())) {
-      b.setVelocityX(0);
+    if (this.OnGround() && (this.WallAhead() || !this.GroundAhead())) {
+      v.x = 0;
       return true; // as close as it can get without leaving its floor
     }
-    b.setVelocityX(this.dir * speedTiles * TILE);
+    v.x = this.dir * speedTiles * TILE;
     return false;
   }
 
-  /** Cut down by a soldier's gun (Mechanic 2): soldiers shoot anything that moves. */
   /** A machine gun is on it: pinned down for a moment (called on every burst). */
-  suppress(): void {
+  Suppress(): void {
     this.suppressed = 0.25;
   }
 
-  shot(): void {
-    if (this.alive) this.die();
+  /** Cut down by a soldier's gun (Mechanic 2): soldiers shoot anything that moves. */
+  Shot(): void {
+    if (this.alive) this.Die();
   }
 
-  private die(): void {
-    this.setState(ZombieState.Dead);
+  private Die(): void {
+    this.SetState(ZombieState.Dead);
     this.distracted = false;
-    this.showIcon('', 0);
+    this.ShowIcon('', 0);
     if (this.fire) { // burned: charred body, the flames die down
-      this.sprite.setTint(0x4a3c34);
+      this.sprite.SetTint(0x4a3c34);
       const f = this.fire;
       this.fire = null;
-      this.scene.tweens.add({ targets: f, alpha: 0, scale: FIRE_SCALE * 0.6, delay: 600, duration: 1800, onComplete: () => f.destroy() });
+      this.engine.tweens.To(f, { alpha: 0, scale: FIRE_SCALE * 0.6 }, 1.8, { delay: 0.6, onDone: () => f.Destroy() });
     }
   }
 
-  private setState(s: ZombieState): void {
+  private SetState(s: ZombieState): void {
     this.state = s;
     this.restartAnim = true; // one-shot animations (grab, hurt, dead) play from the start
   }
 
-  private showIcon(text: string, seconds: number): void {
+  private ShowIcon(text: string, seconds: number): void {
     this.iconText = text;
     this.iconTimer = seconds;
   }
 
-  /**
-   * Standing on something solid. Our own probe instead of Arcade's blocked.down: pressed into a wall
-   * corner (a block on the floor), Arcade's separation leaves blocked.down false while the zombie is
-   * standing still on the floor, so a chasing Runner never jumped and stayed stuck against the block.
-   */
-  private onGround(): boolean {
+  /** Standing on something solid: a thin probe just under the feet. */
+  private OnGround(): boolean {
     const b = this.body;
     if (b.velocity.y < 0) return false; // rising: not grounded
-    return this.physics.overlapRect(b.left + 2, b.bottom + 1, b.width - 4, 2, false, true).length > 0;
+    return this.engine.physics.QueryBox(new Rect(b.left + 2, b.bottom + 1, b.width - 4, 2));
   }
 
-  private wallAhead(): boolean {
+  /** A wall right in front of it (a probe the height of its body, beside it). */
+  private WallAhead(): boolean {
     const b = this.body;
     const x = this.dir > 0 ? b.right + 1 : b.left - 1 - PROBE;
-    return this.physics.overlapRect(x, b.top + 4, PROBE, b.height - 8, false, true).length > 0;
+    return this.engine.physics.QueryBox(new Rect(x, b.top + 4, PROBE, b.height - 8));
   }
 
-  private groundAhead(): boolean {
+  /** Floor in front of its feet (no floor = a ledge edge or a gap). */
+  private GroundAhead(): boolean {
     const b = this.body;
     const x = this.dir > 0 ? b.right + 1 : b.left - 1 - PROBE;
-    return this.physics.overlapRect(x, b.bottom + 2, PROBE, PROBE, false, true).length > 0;
+    return this.engine.physics.QueryBox(new Rect(x, b.bottom + 2, PROBE, PROBE));
   }
 }
 
+/** Where sighted enemies look at the player: 60% up his body. */
+function SightTarget(player: Player): Vec2 {
+  return new Vec2(player.feetX, player.feetY - player.body.height * 0.6);
+}
+
 /**
- * Debug view for all zombies: "zombie tuning" sliders + "zombies" folder with an overlay:
+ * Debug view for all zombies: "zombie tuning" sliders + "zombies" folder with an overlay (DebugDraw):
  * state under each zombie ("*" = distracted, Runner health), Clicker sense radius and destination,
  * Screamer sight area (red while alert) and her line of sight to the player.
  */
 export class ZombieDebug {
   showSenses = true;
 
+  private readonly engine: Engine;
   private readonly zombies: Zombie[];
   private readonly tuning: TuningFolder<ZombieTuning>;
   private readonly folder: GUI;
-  private readonly gfx: Phaser.GameObjects.Graphics;
-  private readonly labels: Phaser.GameObjects.Text[] = [];
-  private readonly scene: Phaser.Scene;
 
-  constructor(scene: Phaser.Scene, zombies: Zombie[]) {
-    this.scene = scene;
+  constructor(engine: Engine, zombies: Zombie[]) {
+    this.engine = engine;
     this.zombies = zombies;
     const t = new TuningFolder('zombie tuning', T);
-    t.add('clickerSpeed', 0, 6, 0.1);
-    t.add('investigateSpeed', 0, 8, 0.1);
-    t.add('huntSpeed', 0, 10, 0.1);
-    t.add('clickerSense', 0, 6, 0.1);
-    t.add('huntLoseTime', 0, 10, 0.1);
-    t.add('searchTime', 0, 10, 0.1);
-    t.add('clickerPause', 0, 5, 0.1);
-    t.add('runnerSpeed', 0, 14, 0.1);
-    t.add('runnerPatrolSpeed', 0, 8, 0.1);
-    t.add('runnerPause', 0, 5, 0.1);
-    t.add('runnerJump', 0, 6, 0.1);
-    t.add('runnerSight', 0, 20, 0.5);
-    t.add('runnerLoseTime', 0, 15, 0.1);
-    t.add('runnerHealth', 1, 10, 1);
-    t.add('stunTime', 0.2, 8, 0.1);
-    t.add('screamerSight', 0, 20, 0.5);
-    t.add('screamerSightHeight', 0, 5, 0.1);
-    t.add('screamerLookTime', 0.5, 10, 0.1);
-    t.add('screamerDistractTime', 0, 10, 0.1);
-    t.add('screamNoise', 0, 30, 0.5);
-    t.add('screamInterval', 0.5, 10, 0.1);
-    t.add('gravity', 5, 80, 1);
+    t.Add('clickerSpeed', 0, 6, 0.1);
+    t.Add('investigateSpeed', 0, 8, 0.1);
+    t.Add('huntSpeed', 0, 10, 0.1);
+    t.Add('clickerSense', 0, 6, 0.1);
+    t.Add('huntLoseTime', 0, 10, 0.1);
+    t.Add('searchTime', 0, 10, 0.1);
+    t.Add('clickerPause', 0, 5, 0.1);
+    t.Add('runnerSpeed', 0, 14, 0.1);
+    t.Add('runnerPatrolSpeed', 0, 8, 0.1);
+    t.Add('runnerPause', 0, 5, 0.1);
+    t.Add('runnerJump', 0, 6, 0.1);
+    t.Add('runnerSight', 0, 20, 0.5);
+    t.Add('runnerLoseTime', 0, 15, 0.1);
+    t.Add('runnerHealth', 1, 10, 1);
+    t.Add('stunTime', 0.2, 8, 0.1);
+    t.Add('screamerSight', 0, 20, 0.5);
+    t.Add('screamerSightHeight', 0, 5, 0.1);
+    t.Add('screamerLookTime', 0.5, 10, 0.1);
+    t.Add('screamerDistractTime', 0, 10, 0.1);
+    t.Add('screamNoise', 0, 30, 0.5);
+    t.Add('screamInterval', 0.5, 10, 0.1);
+    t.Add('gravity', 5, 80, 1);
     this.tuning = t;
 
-    this.folder = debug.gui.addFolder('zombies').close();
+    this.folder = debugPanel.gui.addFolder('zombies').close();
     this.folder.add(this, 'showSenses').name('show senses + states');
-    this.gfx = scene.add.graphics().setDepth(20);
   }
 
-  destroy(): void {
-    this.tuning.destroy();
+  Destroy(): void {
+    this.tuning.Destroy();
     this.folder.destroy();
   }
 
-  draw(player: Player): void {
-    const g = this.gfx;
-    g.clear();
-    while (this.labels.length < this.zombies.length) { // zombies can be spawned later (summoned Runners)
-      this.labels.push(this.scene.add.text(0, 0, '', {
-        fontFamily: 'Consolas, monospace', fontSize: '18px', color: '#ffffff', backgroundColor: '#00000088',
-      }).setOrigin(0.5, 0).setDepth(21));
-    }
+  /** Every frame (immediate mode). */
+  Draw(player: Player): void {
+    if (!this.showSenses) return;
+    const d = this.engine.debug;
     for (let i = 0; i < this.zombies.length; i++) {
       const z = this.zombies[i];
-      const label = this.labels[i];
-      label.setVisible(this.showSenses);
-      if (!this.showSenses) continue;
-      label.setText(z.stateName).setPosition(z.feetX, z.feetY + 6);
+      d.Text(new Vec2(z.feetX, z.feetY + 6), z.stateName);
       if (!z.alive) continue;
 
       if (z.kind === ZombieKind.Clicker) {
-        if (!z.distracted) { // the close-range sense
-          g.lineStyle(2, 0x66ccff, 0.5);
-          g.strokeCircle(z.feetX, z.feetY - z.body.height * 0.5, T.clickerSense * TILE);
-        }
+        if (!z.distracted) d.Circle(new Vec2(z.feetX, z.feetY - z.body.height * 0.5), T.clickerSense * TILE, 0x66ccff, false, 0.5); // the close-range sense
         if (z.state === ZombieState.Investigate || z.state === ZombieState.Hunt || z.state === ZombieState.Return) {
-          g.lineStyle(2, 0xffe066, 0.8);
-          g.lineBetween(z.feetX, z.feetY - 10, z.targetX, z.feetY - 10);
-          g.fillStyle(0xffe066, 1).fillCircle(z.targetX, z.feetY - 10, 6);
+          const from = new Vec2(z.feetX, z.feetY - 10);
+          const to = new Vec2(z.targetX, z.feetY - 10);
+          if (Math.abs(to.x - from.x) > 1) d.Ray(from, to.Sub(from), Math.abs(to.x - from.x), 0xffe066, 0.8); // where it is going
+          d.Point(to, 0xffe066);
         }
       } else if (z.kind === ZombieKind.Screamer) {
         const w = T.screamerSight * TILE;
         const band = T.screamerSightHeight * TILE;
-        const x = z.dir > 0 ? z.feetX : z.feetX - w;
         const alert = z.state === ZombieState.Alert;
-        g.fillStyle(alert ? 0xff3030 : 0xffee55, alert ? 0.3 : 0.15);
-        g.fillRect(x, z.feetY - band, w, band * 2); // where the player's FEET must be
-        if (Phaser.Math.Distance.Between(z.feetX, z.feetY, player.feetX, player.feetY) > w * 1.5) continue; // only near her
-        const clear = z.lineOfSight(player);
-        g.lineStyle(2, clear ? 0x66ff66 : 0xff4444, 0.6);
-        g.lineBetween(z.feetX, z.feetY - z.body.height * 0.8, player.feetX, player.feetY - player.body.height * 0.6);
+        const area = new Rect(z.dir > 0 ? z.feetX : z.feetX - w, z.feetY - band, w, band * 2); // where the player's FEET must be
+        d.Box(area, alert ? 0xff3030 : 0xffee55, true, alert ? 0.3 : 0.15);
+        if (new Vec2(z.feetX, z.feetY).DistanceTo(new Vec2(player.feetX, player.feetY)) > w * 1.5) continue; // only near her
+        d.Line(z.Head(), SightTarget(player), z.LineOfSight(player) ? 0x66ff66 : 0xff4444, 0.6);
       }
     }
   }

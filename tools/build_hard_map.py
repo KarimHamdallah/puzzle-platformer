@@ -1,6 +1,6 @@
 """
 Builds the HARD level's ASCII map (Mechanic 1: noise & distraction, at night), printed as a TypeScript
-array to paste into src/game/Levels.ts (HARD_MAP).
+array to paste into src/game/levels/Levels.ts (HARD_MAP).
 
 Night: you see ~3.5 tiles around you. Clickers flash when they click; lightning lights everything for a
 moment and its thunder covers your footsteps for 2 s. Stashes hold ONE bottle. The upgrade is Listen

@@ -1,7 +1,7 @@
-import Phaser from 'phaser';
-import { Action, type InputActions } from '../core/InputActions';
-import { ART_SCALE, TILE } from './constants';
-import type { Player } from './Player';
+import type { Engine, HtmlNode, Shape, Text } from '../../engine';
+import { Action } from '../Actions';
+import { ART_SCALE, GOLD, Serif, TILE } from '../constants';
+import type { Player } from '../entities/Player';
 
 /**
  * Documents found on the dead (Arabic, Noto Naskh font): the game's guides, told as story.
@@ -11,7 +11,7 @@ import type { Player } from './Player';
  *  - A "!" bobs over the body until the document has been read once (remembered across restarts).
  *  - Standing next to him: Up opens the letter. The game pauses while it is open.
  *  - Arabic book order: ← next page, → previous page; Up / Space / X closes it.
- *  - The paper is an HTML element over the canvas (Phaser DOM): real text shaping, wrapping and fonts.
+ *  - The paper is an HTML element over the canvas: real text shaping, wrapping and fonts.
  */
 
 interface LetterPage {
@@ -143,19 +143,17 @@ const READ_RANGE_X = 1.4 * TILE; // how close you must stand to pick up the lett
 const READ_RANGE_Y = 0.6 * TILE;
 const CORPSE_BACK = 37 / 44; // the corpse sprite's back edge (fraction of its width): sits against the wall
 
-const readDocs = new Set<string>(); // survives scene restarts: the "!" over a body only shows until it was read once
-
+const readDocs = new Set<string>(); // survives level restarts: the "!" over a body only shows until it was read once
 export class Letter {
   open = false;
 
-  private readonly scene: Phaser.Scene;
-  private readonly input: InputActions;
+  private readonly engine: Engine;
   private readonly x: number; // centre of the corpse, feet level
   private readonly y: number;
-  private readonly marker: Phaser.GameObjects.Text;
-  private readonly prompt: Phaser.GameObjects.Text;
-  private readonly shade: Phaser.GameObjects.Rectangle;
-  private readonly element: Phaser.GameObjects.DOMElement;
+  private readonly marker: Text;
+  private readonly prompt: Text;
+  private readonly shade: Shape;
+  private readonly element: HtmlNode;
   private readonly paper: HTMLDivElement;
   private readonly titleEl: HTMLDivElement;
   private readonly bodyEl: HTMLDivElement;
@@ -169,30 +167,26 @@ export class Letter {
    * x = the wall the body leans on (doc.againstWall: its left edge, px) or the body's centre (px);
    * feetY = floor (px).
    */
-  constructor(scene: Phaser.Scene, input: InputActions, doc: LetterDoc, x: number, feetY: number) {
-    this.scene = scene;
-    this.input = input;
+  constructor(engine: Engine, doc: LetterDoc, x: number, feetY: number) {
+    this.engine = engine;
     this.doc = doc;
+    const r = engine.renderer;
     if (doc.againstWall) {
-      const corpse = scene.add.image(x, feetY, doc.sprite).setOrigin(CORPSE_BACK, 1).setScale(ART_SCALE).setDepth(11.5); // in front of the grass (11)
+      const corpse = r.CreateSprite(x, feetY, doc.sprite).SetOrigin(CORPSE_BACK, 1).SetScale(ART_SCALE).SetDepth(11.5); // in front of the grass (11)
       this.x = x - corpse.displayWidth * (CORPSE_BACK - 0.5);
     } else {
-      scene.add.image(x, feetY + 4, doc.sprite).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(11.5);
+      r.CreateSprite(x, feetY + 4, doc.sprite).SetOrigin(0.5, 1).SetScale(ART_SCALE).SetDepth(11.5);
       this.x = x;
     }
-    if (doc.prop) scene.add.image(this.x - TILE * 0.9, feetY + 2, doc.prop).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(11.6);
+    if (doc.prop) r.CreateSprite(this.x - TILE * 0.9, feetY + 2, doc.prop).SetOrigin(0.5, 1).SetScale(ART_SCALE).SetDepth(11.6);
     this.y = feetY;
 
-    this.marker = scene.add.text(this.x, feetY - TILE * 1.2, '!', {
-      fontFamily: 'Georgia, serif', fontSize: '56px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 8,
-    }).setOrigin(0.5, 1).setDepth(25);
-    this.prompt = scene.add.text(this.x, feetY - TILE * 1.25, doc.prompt, {
-      fontFamily: 'Georgia, serif', fontSize: '26px', fontStyle: 'bold', color: '#f0e6c8', stroke: '#000000', strokeThickness: 5,
-    }).setOrigin(0.5, 1).setDepth(25).setVisible(false);
+    this.marker = r.CreateText(this.x, feetY - TILE * 1.2, '!', Serif(56, 'bold', GOLD, 8)).SetOrigin(0.5, 1).SetDepth(25);
+    this.prompt = r.CreateText(this.x, feetY - TILE * 1.25, doc.prompt, Serif(26)).SetOrigin(0.5, 1).SetDepth(25).SetVisible(false);
 
-    const w = scene.scale.width;
-    const h = scene.scale.height;
-    this.shade = scene.add.rectangle(0, 0, w, h, 0x0b0a08, 0.72).setOrigin(0, 0).setScrollFactor(0).setDepth(90).setVisible(false);
+    const w = engine.width;
+    const h = engine.height;
+    this.shade = r.CreateShape().FillStyle(0x0b0a08, 0.72).FillRect(0, 0, w, h).SetFixed().SetDepth(90).SetVisible(false);
 
     const root = document.createElement('div');
     root.className = doc.style ? 'letter ' + doc.style : 'letter';
@@ -206,70 +200,72 @@ export class Letter {
     this.signEl = root.querySelector('.letter-sign') as HTMLDivElement;
     this.pageEl = root.querySelector('.letter-page') as HTMLDivElement;
     this.mastheadEl = root.querySelector('.letter-masthead') as HTMLDivElement;
-    this.element = scene.add.dom(w / 2, h / 2, root).setScrollFactor(0).setDepth(100).setVisible(false);
+    this.element = r.CreateHtml(w / 2, h / 2, root).SetDepth(100).SetVisible(false);
     void document.fonts.load('31px "Noto Naskh Arabic"'); // fetch the font now, not on the first page
   }
 
-  /** Once per frame, after input. While the letter is open the scene skips gameplay. */
-  update(timeMs: number, player: Player): void {
+  /** Once per frame, after input. While the letter is open the level skips gameplay. */
+  Update(timeMs: number, player: Player): void {
+    const input = this.engine.input;
     if (this.open) {
-      if (this.input.pressed(Action.Left)) this.turn(1);
-      else if (this.input.pressed(Action.Right)) this.turn(-1);
-      else if (this.input.pressed(Action.Up) || this.input.pressed(Action.Jump) || this.input.pressed(Action.Attack)
-        || this.input.pressed(Action.Back)) this.close();
+      if (input.Pressed(Action.Left)) this.Turn(1);
+      else if (input.Pressed(Action.Right)) this.Turn(-1);
+      else if (input.Pressed(Action.Up) || input.Pressed(Action.Jump) || input.Pressed(Action.Attack)
+        || input.Pressed(Action.Back)) this.Close();
       return;
     }
 
     const near = !player.dead && Math.abs(player.feetX - this.x) < READ_RANGE_X && Math.abs(player.feetY - this.y) < READ_RANGE_Y;
-    this.prompt.setVisible(near);
+    this.prompt.SetVisible(near);
     const read = readDocs.has(this.doc.id);
-    this.marker.setVisible(!read && !near);
+    this.marker.SetVisible(!read && !near);
     if (!read) { // bob + pulse: "something here"
       this.marker.y = this.y - TILE * 1.2 + Math.sin(timeMs / 220) * 8;
-      this.marker.setScale(1 + Math.sin(timeMs / 140) * 0.08);
+      this.marker.SetScale(1 + Math.sin(timeMs / 140) * 0.08);
     }
-    if (near && this.input.pressed(Action.Up) && !this.input.held(Action.Throw)) this.show();
+    if (near && input.Pressed(Action.Up) && !input.Held(Action.Throw)) this.Show();
   }
 
-  private show(): void {
+  private Show(): void {
     this.open = true;
     readDocs.add(this.doc.id);
     this.page = 0;
-    this.scene.physics.pause(); // the world stops while you read
-    this.shade.setVisible(true);
-    this.element.setVisible(true);
-    this.prompt.setVisible(false);
-    this.marker.setVisible(false);
-    this.render();
+    this.engine.physics.paused = true; // the world stops while you read
+    this.shade.SetVisible(true);
+    this.element.SetVisible(true);
+    this.prompt.SetVisible(false);
+    this.marker.SetVisible(false);
+    this.Render();
   }
 
-  private close(): void {
+  private Close(): void {
+    const input = this.engine.input;
     this.open = false;
-    this.shade.setVisible(false);
-    this.element.setVisible(false);
+    this.shade.SetVisible(false);
+    this.element.SetVisible(false);
     // Keys pressed to read / close must not leak into gameplay (a buffered jump, a crouch toggle).
-    this.input.consume(Action.Jump);
-    this.input.consume(Action.Down);
-    this.input.consume(Action.Attack);
-    this.input.consume(Action.Throw);
-    this.scene.physics.resume();
+    input.Consume(Action.Jump);
+    input.Consume(Action.Down);
+    input.Consume(Action.Attack);
+    input.Consume(Action.Throw);
+    this.engine.physics.paused = false;
   }
 
-  private turn(step: number): void {
+  private Turn(step: number): void {
     const next = this.page + step;
     if (next >= this.doc.pages.length) {
-      this.close(); // past the last page: put the letter down
+      this.Close(); // past the last page: put the letter down
       return;
     }
     if (next < 0) return;
     this.page = next;
-    this.render();
+    this.Render();
     this.paper.classList.remove('turn', 'turn-back');
     void this.paper.offsetWidth; // restart the CSS animation
     this.paper.classList.add(step > 0 ? 'turn' : 'turn-back');
   }
 
-  private render(): void {
+  private Render(): void {
     const pages = this.doc.pages;
     const p = pages[this.page];
     this.mastheadEl.textContent = this.page === 0 ? this.doc.masthead : '';
@@ -285,11 +281,11 @@ export class Letter {
     }
     const last = this.page === pages.length - 1;
     this.signEl.textContent = last ? this.doc.signature : '';
-    this.pageEl.textContent = toArabicDigits(this.page + 1) + ' / ' + toArabicDigits(pages.length);
+    this.pageEl.textContent = ToArabicDigits(this.page + 1) + ' / ' + ToArabicDigits(pages.length);
   }
 }
 
-function toArabicDigits(n: number): string {
+function ToArabicDigits(n: number): string {
   const digits = '٠١٢٣٤٥٦٧٨٩';
   let s = '';
   const text = String(n);

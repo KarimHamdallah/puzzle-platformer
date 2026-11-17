@@ -1,6 +1,6 @@
 """
 Builds MECHANIC 2 EASY's ASCII map (snipers), printed as a TypeScript array to paste into
-src/game/Levels.ts (M2_EASY_MAP). The snipers themselves are LevelData.snipers (nest tile, area, zones).
+src/game/levels/Levels.ts (M2_EASY_MAP). The snipers themselves are LevelData.snipers (nest tile, area, zones).
 
 Story: the army is wiping the village out; its snipers shoot anything that moves, people or infected.
 A deserter lies dead in a camp at the start, shot from the tower; his newspaper explains, and his note

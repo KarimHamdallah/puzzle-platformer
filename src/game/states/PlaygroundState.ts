@@ -1,8 +1,7 @@
-import Phaser from 'phaser';
-import { DEBUG_ENABLED, TuningFolder } from '../core/Debug';
-import { Action, InputActions } from '../core/InputActions';
-import { CameraRig } from './CameraRig';
-import { TILE } from './constants';
+import { BodyType, CameraFollow, DEBUG_ENABLED, Ease, GameState, MathUtil, Rect, TuningFolder, type Body, type Engine, type Group, type Shape, type TextStyle } from '../../engine';
+import { Action, MoveX } from '../Actions';
+import { TILE } from '../constants';
+import { StateId } from './StateId';
 
 // ---------------------------------------------------------------- Day 1, as it was
 // The very first movement test (commit aa7980a): the greybox room and the white cube with eyes, with
@@ -118,95 +117,84 @@ class CubeTuning {
 
 const T = new CubeTuning();
 
-/** Gravity (px/s²) and jump launch speed (px/s) derived from the tuning. */
-function cubeGravity(): number {
-  const h = T.jumpHeight * TILE;
-  return (2 * h) / (T.timeToApex * T.timeToApex);
+/** Gravity (px/s²) and jump launch speed (px/s) derived from the tuning: g = 2h / t², v = 2h / t. */
+function CubeGravity(): number {
+  return (2 * T.jumpHeight * TILE) / (T.timeToApex * T.timeToApex);
 }
 
-function cubeJumpSpeed(): number {
+function CubeJumpSpeed(): number {
   return (2 * T.jumpHeight * TILE) / T.timeToApex;
-}
-
-function moveTowards(current: number, target: number, maxDelta: number): number {
-  if (Math.abs(target - current) <= maxDelta) return target;
-  return current + Math.sign(target - current) * maxDelta;
 }
 
 /** The Day 1 cube: white block + two grey eyes that look where you move. */
 class Cube {
-  readonly body: Phaser.Physics.Arcade.Body;
+  readonly body: Body;
   /** Visual root, positioned at the FEET centre so squash & stretch pivots on the ground. */
-  readonly view: Phaser.GameObjects.Container;
+  readonly view: Group;
   grounded = false;
   jumping = false; // rising/falling after a jump (not after walking off a ledge): enables jump cut + apex hang
   facing = 1;
 
-  private readonly scene: Phaser.Scene;
-  private readonly input: InputActions;
-  private readonly ghost: Phaser.GameObjects.Graphics;
-  private readonly eyes: Phaser.GameObjects.Graphics;
+  private readonly engine: Engine;
+  private readonly ghost: Shape;
+  private readonly eyes: Shape;
   private simTime = 0; // physics time, s
   private lastGroundedAt = -Infinity;
   private airborneVy = 0;
 
-  constructor(scene: Phaser.Scene, input: InputActions, feetX: number, feetY: number) {
-    this.scene = scene;
-    this.input = input;
-    // Physics: a bare Arcade body (no sprite). We integrate gravity ourselves.
-    this.body = scene.physics.add.body(feetX - CUBE_W / 2, feetY - CUBE_H, CUBE_W, CUBE_H);
-    this.body.setAllowGravity(false);
+  constructor(engine: Engine, feetX: number, feetY: number) {
+    this.engine = engine;
+    const r = engine.renderer;
+    // Physics: a bare body (no sprite). We integrate gravity ourselves.
+    this.body = engine.physics.CreateBody({ type: BodyType.Dynamic, x: feetX - CUBE_W / 2, y: feetY - CUBE_H, w: CUBE_W, h: CUBE_H, gravityScale: 0 });
 
     // Takeoff ghost: same silhouette, dark and translucent, left where the last jump started.
-    this.ghost = scene.add.graphics().setVisible(false).setDepth(5);
-    this.ghost.fillStyle(GHOST_COLOR, 1).fillRect(-CUBE_W / 2, -CUBE_H, CUBE_W, CUBE_H);
+    this.ghost = r.CreateShape().SetVisible(false).SetDepth(5);
+    this.ghost.FillStyle(GHOST_COLOR, 1).FillRect(-CUBE_W / 2, -CUBE_H, CUBE_W, CUBE_H);
 
-    const shape = scene.add.graphics();
-    shape.fillStyle(CUBE_COLOR, 1).fillRect(-CUBE_W / 2, -CUBE_H, CUBE_W, CUBE_H);
-    this.eyes = scene.add.graphics();
-    this.eyes.fillStyle(EYES_COLOR, 1);
-    this.eyes.fillRect(-9, -CUBE_H * 0.78, 6, 14);
-    this.eyes.fillRect(3, -CUBE_H * 0.78, 6, 14);
-    this.view = scene.add.container(feetX, feetY, [shape, this.eyes]).setDepth(10);
+    const shape = r.CreateShape().FillStyle(CUBE_COLOR, 1).FillRect(-CUBE_W / 2, -CUBE_H, CUBE_W, CUBE_H);
+    this.eyes = r.CreateShape().FillStyle(EYES_COLOR, 1);
+    this.eyes.FillRect(-9, -CUBE_H * 0.78, 6, 14).FillRect(3, -CUBE_H * 0.78, 6, 14);
+    this.view = r.CreateGroup(feetX, feetY).SetDepth(10).Add(shape, this.eyes);
   }
 
   get feetX(): number {
-    return this.body.center.x;
+    return this.body.centerX;
   }
 
   get feetY(): number {
     return this.body.bottom;
   }
 
-  respawn(): void {
-    this.body.reset(SPAWN_X * TILE - CUBE_W / 2, SPAWN_Y * TILE - CUBE_H);
+  Respawn(): void {
+    this.body.Teleport(SPAWN_X * TILE - CUBE_W / 2, SPAWN_Y * TILE - CUBE_H);
     this.jumping = false;
     this.grounded = false;
     this.lastGroundedAt = -Infinity;
-    this.ghost.setVisible(false);
+    this.ghost.SetVisible(false);
   }
 
   /** Visuals, once per rendered frame. */
-  update(deltaMs: number): void {
-    this.view.setPosition(this.feetX, this.feetY);
+  Update(dt: number): void {
+    this.view.SetPosition(this.feetX, this.feetY);
     // Eyes drift toward the facing side and look up/down with vertical speed.
     const targetX = this.facing * CUBE_W * 0.16;
-    const targetY = Phaser.Math.Clamp(this.body.velocity.y / cubeJumpSpeed(), -1, 1) * 5;
-    const k = 1 - Math.exp(-deltaMs / 50); // frame-rate independent smoothing
+    const targetY = MathUtil.Clamp(this.body.velocity.y / CubeJumpSpeed(), -1, 1) * 5;
+    const k = MathUtil.Smoothing(dt, 0.05); // frame-rate independent smoothing
     this.eyes.x += (targetX - this.eyes.x) * k;
     this.eyes.y += (targetY - this.eyes.y) * k;
   }
 
   /** Gameplay, at the physics rate. */
-  fixedUpdate(dt: number): void {
+  FixedUpdate(dt: number): void {
     const b = this.body;
-    const input = this.input;
+    const input = this.engine.input;
     this.simTime += dt;
 
     // Ground check. Ignore it while moving up (we just jumped; contact flags can be stale for a step).
-    const onGround = (b.blocked.down || b.touching.down) && b.velocity.y >= 0;
+    const onGround = b.contacts.down && b.velocity.y >= 0;
     if (onGround) {
-      if (!this.grounded) this.land();
+      if (!this.grounded) this.Land();
       this.lastGroundedAt = this.simTime;
       this.jumping = false;
     } else {
@@ -216,7 +204,7 @@ class Cube {
 
     // horizontal: move toward target speed with separate accel / decel / turn times
     const runSpeed = T.runSpeed * TILE;
-    const target = input.moveX * runSpeed;
+    const target = MoveX(input) * runSpeed;
     let vx = b.velocity.x;
     let time: number;
     if (target !== 0) {
@@ -226,176 +214,150 @@ class Cube {
     } else {
       time = onGround ? T.decelTime : T.airDecelTime;
     }
-    vx = time <= 0 ? target : moveTowards(vx, target, (runSpeed / time) * dt);
+    vx = time <= 0 ? target : MathUtil.MoveTowards(vx, target, (runSpeed / time) * dt);
 
     // jump: buffered press + coyote time
-    const gravity = cubeGravity();
+    const gravity = CubeGravity();
     let vy = b.velocity.y;
     const canJump = !this.jumping && this.simTime - this.lastGroundedAt <= T.coyoteMs / 1000;
-    if (canJump && input.buffered(Action.Jump, T.jumpBufferMs)) {
-      input.consume(Action.Jump);
+    if (canJump && input.Buffered(Action.Jump, T.jumpBufferMs)) {
+      input.Consume(Action.Jump);
       // +half a gravity step: gravity is applied below in this same step, and the fixed-step
       // integrator would otherwise lose ~0.15 tiles on every jump.
-      vy = -(cubeJumpSpeed() + 0.5 * gravity * dt);
-      this.jump();
+      vy = -(CubeJumpSpeed() + 0.5 * gravity * dt);
+      this.Jump();
     }
 
     // gravity with modifiers
     let g = gravity;
     if (vy > 0) g *= T.fallGravityMult;
-    else if (vy < 0 && this.jumping && !input.held(Action.Jump)) g *= T.jumpCutGravityMult;
-    if (this.jumping && input.held(Action.Jump) && Math.abs(vy) < T.apexThreshold * TILE) g *= T.apexGravityMult;
-    const fastFalling = input.held(Action.Down) && vy > 0;
+    else if (vy < 0 && this.jumping && !input.Held(Action.Jump)) g *= T.jumpCutGravityMult;
+    if (this.jumping && input.Held(Action.Jump) && Math.abs(vy) < T.apexThreshold * TILE) g *= T.apexGravityMult;
+    const fastFalling = input.Held(Action.Down) && vy > 0;
     if (fastFalling) g *= T.fastFallGravityMult;
 
     vy += g * dt;
     vy = Math.min(vy, (fastFalling ? T.fastFallSpeed : T.maxFallSpeed) * TILE);
-    b.setVelocity(vx, vy);
+    b.SetVelocity(vx, vy);
   }
 
-  private jump(): void {
+  private Jump(): void {
     this.jumping = true;
     this.grounded = false;
     this.lastGroundedAt = -Infinity; // no second coyote jump
 
     // Ghost marks the takeoff frame; it moves on every new jump.
-    this.ghost.setPosition(this.feetX, this.feetY).setVisible(T.ghostAlpha > 0);
-    this.scene.tweens.killTweensOf(this.ghost);
-    this.ghost.setAlpha(0);
-    this.scene.tweens.add({ targets: this.ghost, alpha: T.ghostAlpha, duration: 90 });
-    this.pulseScale(1 - T.squash * 0.6, 1 + T.squash * 0.6, 160);
+    this.ghost.SetPosition(this.feetX, this.feetY).SetVisible(T.ghostAlpha > 0).SetAlpha(0);
+    this.engine.tweens.Kill(this.ghost);
+    this.engine.tweens.To(this.ghost, { alpha: T.ghostAlpha }, 0.09);
+    this.PulseScale(1 - T.squash * 0.6, 1 + T.squash * 0.6, 0.16);
   }
 
-  private land(): void {
-    const impact = Phaser.Math.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
-    this.pulseScale(1 + T.squash * impact, 1 - T.squash * impact, 130);
+  private Land(): void {
+    const impact = MathUtil.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
+    this.PulseScale(1 + T.squash * impact, 1 - T.squash * impact, 0.13);
   }
 
   /** Squash & stretch: snap to (sx, sy) then spring back to 1. Visual only, the hitbox never changes. */
-  private pulseScale(sx: number, sy: number, duration: number): void {
+  private PulseScale(sx: number, sy: number, seconds: number): void {
     if (T.squash <= 0) return;
-    this.scene.tweens.killTweensOf(this.view);
-    this.view.setScale(sx, sy);
-    this.scene.tweens.add({ targets: this.view, scaleX: 1, scaleY: 1, duration: duration, ease: 'Back.easeOut' });
+    this.engine.tweens.Kill(this.view);
+    this.view.SetScale(sx, sy);
+    this.engine.tweens.To(this.view, { scaleX: 1, scaleY: 1 }, seconds, { ease: Ease.BackOut });
   }
 }
 
-// ---------------------------------------------------------------- scene
+// ---------------------------------------------------------------- the state
 
-/**
- * Movement test room. Frame order (like a C++ main loop):
- *   1. physics steps at 60 Hz -> fixedUpdate(dt) -> cube.fixedUpdate(dt)   (gameplay)
- *   2. update()               -> controls, cube visuals                    (once per rendered frame)
- *   3. render
- */
-export class PlaygroundScene extends Phaser.Scene {
-  private controls!: InputActions;
+/** The movement test room: the cube, the greybox, the signs, the dead-zone camera. */
+export class PlaygroundState extends GameState {
   private cube!: Cube;
-  private cameraRig!: CameraRig;
+  private cameraRig!: CameraFollow;
   private tuning: TuningFolder<CubeTuning> | null = null;
-  private world!: Phaser.Physics.Arcade.World;
 
-  constructor() {
-    super('Playground');
-  }
+  OnStart(): void {
+    const e = this.engine;
+    const r = e.renderer;
+    e.camera.SetBackground(BACKGROUND);
+    e.camera.FadeIn(0.2);
 
-  create(): void {
-    const worldW = ROOM_W * TILE;
-    const worldH = ROOM_H * TILE;
-    this.world = this.physics.world;
-    this.world.setBounds(0, 0, worldW, worldH);
-    const cam = this.cameras.main;
-    cam.setBackgroundColor(BACKGROUND);
-    cam.fadeIn(200);
-
-    const solids = this.physics.add.staticGroup();
     for (let i = 0; i < SOLIDS.length; i++) {
       const s = SOLIDS[i];
-      solids.add(this.add.rectangle((s.x + s.w / 2) * TILE, (s.y + s.h / 2) * TILE, s.w * TILE, s.h * TILE, SOLID));
+      const box = new Rect(s.x * TILE, s.y * TILE, s.w * TILE, s.h * TILE);
+      r.CreateShape().FillStyle(SOLID, 1).FillRect(box.x, box.y, box.w, box.h);
+      e.physics.CreateStaticBox(box);
     }
 
-    this.controls = new InputActions();
-    this.cube = new Cube(this, this.controls, SPAWN_X * TILE, SPAWN_Y * TILE);
-    this.physics.add.collider(this.cube.body, solids);
-
-    this.cameraRig = new CameraRig(this, this.cube, worldW, worldH); // dead zone: small moves don't move the camera
+    this.cube = new Cube(e, SPAWN_X * TILE, SPAWN_Y * TILE);
+    // dead zone: small moves don't move the camera
+    this.cameraRig = new CameraFollow(e.camera, r, this.cube.body, new Rect(0, 0, ROOM_W * TILE, ROOM_H * TILE), TILE);
 
     if (DEBUG_ENABLED) {
       const t = new TuningFolder('cube tuning', T);
-      t.add('runSpeed', 1, 20, 0.1);
-      t.add('accelTime', 0, 0.6, 0.01);
-      t.add('decelTime', 0, 0.6, 0.01);
-      t.add('turnTime', 0, 0.6, 0.01);
-      t.add('airAccelTime', 0, 1, 0.01);
-      t.add('airDecelTime', 0, 1, 0.01);
-      t.add('jumpHeight', 0.5, 8, 0.1);
-      t.add('timeToApex', 0.1, 1, 0.01);
-      t.add('fallGravityMult', 0.5, 4, 0.05);
-      t.add('jumpCutGravityMult', 1, 6, 0.1);
-      t.add('apexThreshold', 0, 6, 0.1);
-      t.add('apexGravityMult', 0.1, 1, 0.05);
-      t.add('maxFallSpeed', 2, 40, 0.5);
-      t.add('fastFallSpeed', 2, 50, 0.5);
-      t.add('fastFallGravityMult', 1, 4, 0.1);
-      t.add('coyoteMs', 0, 300, 5);
-      t.add('jumpBufferMs', 0, 300, 5);
-      t.add('squash', 0, 0.6, 0.01);
-      t.add('ghostAlpha', 0, 1, 0.01);
+      t.Add('runSpeed', 1, 20, 0.1);
+      t.Add('accelTime', 0, 0.6, 0.01);
+      t.Add('decelTime', 0, 0.6, 0.01);
+      t.Add('turnTime', 0, 0.6, 0.01);
+      t.Add('airAccelTime', 0, 1, 0.01);
+      t.Add('airDecelTime', 0, 1, 0.01);
+      t.Add('jumpHeight', 0.5, 8, 0.1);
+      t.Add('timeToApex', 0.1, 1, 0.01);
+      t.Add('fallGravityMult', 0.5, 4, 0.05);
+      t.Add('jumpCutGravityMult', 1, 6, 0.1);
+      t.Add('apexThreshold', 0, 6, 0.1);
+      t.Add('apexGravityMult', 0.1, 1, 0.05);
+      t.Add('maxFallSpeed', 2, 40, 0.5);
+      t.Add('fastFallSpeed', 2, 50, 0.5);
+      t.Add('fastFallGravityMult', 1, 4, 0.1);
+      t.Add('coyoteMs', 0, 300, 5);
+      t.Add('jumpBufferMs', 0, 300, 5);
+      t.Add('squash', 0, 0.6, 0.01);
+      t.Add('ghostAlpha', 0, 1, 0.01);
       this.tuning = t;
     }
 
-    for (let i = 0; i < SIGNS.length; i++) this.addSign(SIGNS[i]);
+    for (let i = 0; i < SIGNS.length; i++) this.AddSign(SIGNS[i]);
 
-    this.add.text(1.6 * TILE, 1.2 * TILE, 'DAY 1  -  MOVEMENT TEST ROOM', { // in the room, above the first sign
-      fontFamily: 'Georgia, serif', fontSize: '34px', fontStyle: 'bold', color: '#ffffff', stroke: '#1d3a2a', strokeThickness: 6,
-    }).setDepth(2);
-    this.add.text(24, this.scale.height - 20, 'Move ←→   Jump Space (hold = higher)   Fast fall ↓   Respawn R   Level select Esc', {
-      fontFamily: 'Georgia, serif', fontSize: '22px', color: '#ffffff', stroke: '#1d3a2a', strokeThickness: 4,
-    }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
-
-    // Arcade fires WORLD_STEP after each physics step's collisions are resolved.
-    this.world.on(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+    const title: TextStyle = { family: 'Georgia, serif', size: 34, style: 'bold', color: '#ffffff', stroke: '#1d3a2a', strokeThickness: 6 };
+    r.CreateText(1.6 * TILE, 1.2 * TILE, 'DAY 1  -  MOVEMENT TEST ROOM', title).SetDepth(2); // in the room, above the first sign
+    const help: TextStyle = { family: 'Georgia, serif', size: 22, color: '#ffffff', stroke: '#1d3a2a', strokeThickness: 4 };
+    r.CreateText(24, e.height - 20, 'Move ←→   Jump Space (hold = higher)   Fast fall ↓   Respawn R   Level select Esc', help)
+      .SetOrigin(0, 1).SetFixed().SetDepth(50);
   }
 
-  update(_time: number, deltaMs: number): void {
-    this.controls.update();
-    if (this.controls.pressed(Action.Back)) {
-      this.scene.start('Menu');
+  OnDestroy(): void {
+    if (this.tuning) this.tuning.Destroy();
+    this.cameraRig.Destroy();
+  }
+
+  OnFixedUpdate(dt: number): void {
+    this.cube.FixedUpdate(dt);
+  }
+
+  OnUpdate(dt: number): void {
+    const input = this.engine.input;
+    if (input.Pressed(Action.Back)) {
+      this.engine.states.ChangeState(StateId.Menu);
       return;
     }
-    if (this.controls.pressed(Action.Reset)) {
-      this.cube.respawn();
-      this.cameraRig.snap();
+    if (input.Pressed(Action.Reset)) {
+      this.cube.Respawn();
+      this.cameraRig.Snap();
     }
-    this.cube.update(deltaMs);
-    this.cameraRig.update(deltaMs);
-  }
-
-  private fixedUpdate(dt: number): void {
-    this.cube.fixedUpdate(dt);
+    this.cube.Update(dt);
+    this.cameraRig.Update(dt);
   }
 
   /** A title line and a wrapped description, on a faint dark plate so it reads over the green. */
-  private addSign(sign: Sign): void {
+  private AddSign(sign: Sign): void {
+    const r = this.engine.renderer;
     const x = sign.x * TILE;
     const y = sign.y * TILE;
-    const title = this.add.text(x + 16, y + 12, sign.title, {
-      fontFamily: 'Georgia, serif', fontSize: '26px', fontStyle: 'bold', color: '#ffffff',
-    }).setDepth(2);
+    const title = r.CreateText(x + 16, y + 12, sign.title, { family: 'Georgia, serif', size: 26, style: 'bold', color: '#ffffff' }).SetDepth(2);
     const w = Math.max(SIGN_WIDTH * TILE, title.width + 32); // long titles widen the plate
-    const body = this.add.text(x + 16, y + 12 + title.height + 4, sign.text, {
-      fontFamily: 'Georgia, serif', fontSize: '21px', color: '#e8f5ec', wordWrap: { width: w - 32 }, lineSpacing: 4,
-    }).setDepth(2);
+    const body = r.CreateText(x + 16, y + 12 + title.height + 4, sign.text,
+      { family: 'Georgia, serif', size: 21, color: '#e8f5ec', wrapWidth: w - 32, lineSpacing: 4 }).SetDepth(2);
     const h = title.height + body.height + 30;
-    this.add.rectangle(x, y, w, h, 0x1d3a2a, 0.45).setOrigin(0, 0).setDepth(1);
-  }
-
-  /** Our "destructor". Uses this.world: scene.physics.world is already null when SHUTDOWN fires. */
-  private shutdown(): void {
-    this.world.off(Phaser.Physics.Arcade.Events.WORLD_STEP, this.fixedUpdate, this);
-    if (this.tuning) this.tuning.destroy();
-    this.cameraRig.destroy();
-    this.controls.destroy();
+    r.CreateShape().FillStyle(0x1d3a2a, 0.45).FillRect(x, y, w, h).SetDepth(1);
   }
 }

@@ -1,6 +1,6 @@
 """
 Builds MECHANIC 2 HARD's ASCII map (the helicopter escape), printed as a TypeScript array to paste into
-src/game/Levels.ts (M2_HARD_MAP). The helicopter itself is LevelData.heli (Helicopter.ts).
+src/game/levels/Levels.ts (M2_HARD_MAP). The helicopter itself is LevelData.heli (Helicopter.ts).
 
 An army helicopter follows you along a valley (slower than your sprint) with the mad sniper in its
 door and a gun under its nose. Run crate to crate (wooden crates break, concrete holds), crouch, keep

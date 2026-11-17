@@ -1,7 +1,7 @@
-import Phaser from 'phaser';
-import { ART_SCALE, TILE } from './constants';
+import { MathUtil, Rect, Vec2, type Engine, type Shape } from '../../engine';
+import { ART_SCALE, TILE } from '../constants';
+import { BoltAction, GunBurst, RifleShot } from '../Assets';
 import type { Player } from './Player';
-import { boltAction, gunBurst, rifleShot } from './Sfx';
 import type { Zombie } from './Zombie';
 
 /**
@@ -16,13 +16,14 @@ import type { Zombie } from './Zombie';
  *    A crate between you and him takes the bullet, if you CROUCH behind it: he aims at your head, and
  *    standing it shows over the crate. Run during the reload, crate to crate.
  *  - Mad sniper (def.mad): the reload is random and sometimes he fires twice; the bolt sound is the
- *    only honest signal. Bullets that hit cover call onCoverHit (the scene breaks wooden crates).
+ *    only honest signal. Bullets that hit cover call onCoverHit (the level breaks wooden crates).
  * Machine gunner ("no mercy"):
  *  - Watches one stretch of ground and opens fire on ANYTHING exposed in it. On you: you are pinned
  *    where you stand (Player.pinned) while he empties GUNNER_PLAYER_TIME of fire into you; no escape. A
  *    zombie takes him GUNNER_KILL_TIME to cut down, pinned down meanwhile (it can't move or grab: run
  *    right past it). Lure an infected into his ground and run while he is busy with it.
- * Shots are flashes, a camera shake, the laser line and recorded gunshots (Sfx.ts); no bullets in flight.
+ * Shots are flashes, a camera shake, the laser line and recorded gunshots; no bullets in flight.
+ * Debug ("show hitboxes"): his area, the gunner's ground, and the line of fire as a ray.
  */
 
 export enum SniperKind {
@@ -46,7 +47,7 @@ export interface SniperDef {
   zones: SniperZone[];
   mad?: boolean; // rifle: random reload (MAD_RELOAD_MIN..MAX, listen for the bolt), sometimes a double shot
   blind?: [number, number, number, number][]; // tile rects x0, y0, x1, y1 he can't see (right under his nest)
-  mounted?: boolean; // on a helicopter: no nest sprite; the owner moves him (setMuzzle / setZone / active)
+  mounted?: boolean; // on a helicopter: no nest sprite; the owner moves him (SetMuzzle / SetZone / active)
 }
 
 enum State {
@@ -54,6 +55,12 @@ enum State {
   Aim, // rifle: chasing you, fires once the dot has been on you for AIM_TIME
   Reload, // rifle: laser dim, still following you
   Firing, // gunner: bursts at a target
+}
+
+/** A shot's path: where it stopped, and whether something stopped it before its end point. */
+interface RayResult {
+  point: Vec2;
+  blocked: boolean;
 }
 
 const SWEEP_SPEED = 7; // tiles/s the laser wanders
@@ -80,36 +87,33 @@ const LASER_COLOUR = 0xff2a3a;
 const FLASH_TIME = 0.07; // s
 
 export class Sniper {
-  private readonly scene: Phaser.Scene;
+  active = true; // mounted: off until the helicopter arrives, off once you are out of reach
+
+  private readonly engine: Engine;
   private readonly def: SniperDef;
   private readonly player: Player;
   private readonly zombies: Zombie[];
-  private readonly covers: Phaser.Geom.Rectangle[];
+  private readonly covers: Rect[];
   private readonly solidAt: (x: number, y: number) => boolean;
   private readonly onCoverHit: (x: number, y: number) => void; // a bullet hit cover (crates break)
   private doubleShot = false; // the mad sniper's second shot is coming
-  private readonly gfx: Phaser.GameObjects.Graphics;
-  private muzzleX: number;
-  private muzzleY: number;
-  active = true; // mounted: off until the helicopter arrives, off once you are out of reach
+  private readonly gfx: Shape;
+  private readonly muzzle: Vec2;
   private state = State.Idle;
   private timer = 0;
-  private laserX: number; // where he is pointing (px)
-  private laserY: number;
-  private goalX: number; // rifle idle: next point to wander to / gunner: sweep end
-  private goalY: number;
+  private readonly laser: Vec2; // where he is pointing (px)
+  private readonly goal: Vec2; // rifle idle: next point to wander to / gunner: sweep end
   private sweepDir = -1;
   private spotted = 0; // mounted gunner: s you have been exposed in his ground
   private target: Zombie | null = null; // gunner: the infected he is cutting down (null = the player)
   private burst = 0;
   private flash = 0; // s left of the muzzle / impact flash
-  private impactX = 0;
-  private impactY = 0;
-  private hits = new Map<Zombie, number>(); // gunner: s of fire each infected has taken
+  private readonly impact = new Vec2();
+  private readonly hits = new Map<Zombie, number>(); // gunner: s of fire each infected has taken
 
-  constructor(scene: Phaser.Scene, def: SniperDef, player: Player, zombies: Zombie[], covers: Phaser.Geom.Rectangle[],
+  constructor(engine: Engine, def: SniperDef, player: Player, zombies: Zombie[], covers: Rect[],
     solidAt: (x: number, y: number) => boolean, onCoverHit: (x: number, y: number) => void) {
-    this.scene = scene;
+    this.engine = engine;
     // A copy: a mounted gunner's zone moves every frame, the level's data must not.
     this.def = { ...def, zones: def.zones.map(z => ({ ...z })) };
     this.player = player;
@@ -120,25 +124,23 @@ export class Sniper {
     const feetX = (def.tile[0] + 0.5) * TILE;
     const feetY = (def.tile[1] + 1) * TILE;
     const gunner = def.kind === SniperKind.Gunner;
-    if (!def.mounted) scene.add.image(feetX, feetY, gunner ? 'gunner_nest' : 'sniper_nest').setOrigin(0.5, 1).setScale(ART_SCALE).setFlipX(true).setDepth(6);
-    this.muzzleX = feetX + (gunner ? -54 : -60); // barrel tip of the (flipped) nest sprite
-    this.muzzleY = feetY - 54;
+    if (!def.mounted) {
+      engine.renderer.CreateSprite(feetX, feetY, gunner ? 'gunner_nest' : 'sniper_nest').SetOrigin(0.5, 1).SetScale(ART_SCALE).SetFlipX(true).SetDepth(6);
+    }
+    this.muzzle = new Vec2(feetX + (gunner ? -54 : -60), feetY - 54); // barrel tip of the (flipped) nest sprite
     const z = def.zones[0];
-    this.laserX = (z.x0 + z.x1) * 0.5 * TILE;
-    this.laserY = z.y1 * TILE;
-    this.goalX = this.laserX;
-    this.goalY = this.laserY;
-    this.gfx = scene.add.graphics().setDepth(30);
+    this.laser = new Vec2((z.x0 + z.x1) * 0.5 * TILE, z.y1 * TILE);
+    this.goal = this.laser.Clone();
+    this.gfx = engine.renderer.CreateShape().SetDepth(30);
   }
 
   /** Mounted: where the barrel is now (px). */
-  setMuzzle(x: number, y: number): void {
-    this.muzzleX = x;
-    this.muzzleY = y;
+  SetMuzzle(x: number, y: number): void {
+    this.muzzle.Set(x, y);
   }
 
   /** Rifle: as if he had just fired (the laser follows, the shot waits `seconds`). */
-  holdFire(seconds: number): void {
+  HoldFire(seconds: number): void {
     this.state = State.Reload;
     this.timer = seconds;
   }
@@ -149,15 +151,13 @@ export class Sniper {
   }
 
   /** Mounted: the laser dot starts here (px), not where the level's zone would put it. */
-  setLaser(x: number, y: number): void {
-    this.laserX = x;
-    this.laserY = y;
-    this.goalX = x;
-    this.goalY = y;
+  SetLaser(x: number, y: number): void {
+    this.laser.Set(x, y);
+    this.goal.Set(x, y);
   }
 
   /** Mounted gunner: the ground he covers now (tiles). */
-  setZone(x0: number, y0: number, x1: number, y1: number): void {
+  SetZone(x0: number, y0: number, x1: number, y1: number): void {
     const z = this.def.zones[0];
     z.x0 = x0;
     z.y0 = y0;
@@ -166,7 +166,7 @@ export class Sniper {
   }
 
   /** Gameplay, at the physics rate. */
-  fixedUpdate(dt: number): void {
+  FixedUpdate(dt: number): void {
     this.flash = Math.max(0, this.flash - dt);
     if (!this.active) { // switched off: no aiming, no firing, the laser goes dark
       if (this.state !== State.Idle) this.state = State.Reload;
@@ -174,65 +174,63 @@ export class Sniper {
       if (this.player.pinned && !this.player.dead) this.player.pinned = false;
       return;
     }
-    if (this.def.kind === SniperKind.Rifle) this.rifle(dt);
-    else this.gunner(dt);
+    if (this.def.kind === SniperKind.Rifle) this.Rifle(dt);
+    else this.Gunner(dt);
   }
 
   // ---------------------------------------------------------------- rifle
 
-  private rifle(dt: number): void {
+  private Rifle(dt: number): void {
     const p = this.player;
     // invisible (cheat) or in a blind spot (right under his nest): he can't find you
-    const inArea = !p.dead && !p.invisible && this.playerInArea() && !this.inBlindSpot();
+    const inArea = !p.dead && !p.invisible && this.PlayerInArea() && !this.InBlindSpot();
     switch (this.state) {
       case State.Idle:
-        this.wander(dt);
-        if (inArea) this.startAim(); // step into his area and he has you
+        this.Wander(dt);
+        if (inArea) this.StartAim(); // step into his area and he has you
         break;
       case State.Aim: {
         if (!inArea) { // got out (under the tower, past it): back to wandering
           this.state = State.Idle;
-          this.pickGoal();
+          this.PickGoal();
           break;
         }
-        const tx = p.body.center.x;
-        const ty = this.headY();
-        this.track(dt, tx, ty, CHASE_SPEED);
-        if (Phaser.Math.Distance.Between(this.laserX, this.laserY, tx, ty) < LOCK_RADIUS * TILE) this.timer -= dt;
-        if (this.timer <= 0) this.fireRifle();
+        const aim = this.AimPoint();
+        this.Track(dt, aim, CHASE_SPEED);
+        if (this.laser.DistanceTo(aim) < LOCK_RADIUS * TILE) this.timer -= dt;
+        if (this.timer <= 0) this.FireRifle();
         break;
       }
       case State.Reload:
-        if (!p.dead) this.track(dt, p.body.center.x, this.headY(), RELOAD_CHASE);
+        if (!p.dead) this.Track(dt, this.AimPoint(), RELOAD_CHASE);
         this.timer -= dt;
         if (this.timer <= 0) {
-          if (inArea) this.startAim(); // once he has you, he keeps going
+          if (inArea) this.StartAim(); // once he has you, he keeps going
           else this.state = State.Idle;
         }
         break;
     }
   }
 
-  private startAim(): void {
+  private StartAim(): void {
     this.state = State.Aim;
     this.timer = AIM_TIME;
   }
 
-  private fireRifle(): void {
+  private FireRifle(): void {
     const p = this.player;
-    const hit = this.ray(this.muzzleX, this.muzzleY, p.body.center.x, this.headY());
+    const hit = this.Ray(this.muzzle, this.AimPoint());
     if (!hit.blocked && p.hidden && !p.invisible) { // crouched behind cover, seen from above: the round takes the cover
-      const c = this.coverOver(p.body.center.x, p.body.bottom - 1);
+      const c = this.CoverOver(p.body.centerX, p.body.bottom - 1);
       if (c) {
-        hit.x = Phaser.Math.Clamp(p.body.center.x, c.x, c.right);
-        hit.y = c.y + 4;
+        hit.point.Set(MathUtil.Clamp(p.body.centerX, c.x, c.right), c.y + 4);
         hit.blocked = true;
       }
     }
-    this.shotEffects(hit.x, hit.y, 0.008, 180);
-    rifleShot(this.scene);
-    if (hit.blocked && this.inCover(hit.x, hit.y)) this.onCoverHit(hit.x, hit.y);
-    if (!hit.blocked && !p.dead) p.kill(); // in the open: one shot
+    this.ShotEffects(hit.point, 0.008, 0.18);
+    RifleShot(this.engine);
+    if (hit.blocked && this.InCover(hit.point)) this.onCoverHit(hit.point.x, hit.point.y);
+    if (!hit.blocked && !p.dead) p.Kill(); // in the open: one shot
     if (this.def.mad && !this.doubleShot && Math.random() < MAD_DOUBLE_CHANCE) { // a second shot, right away
       this.doubleShot = true;
       this.state = State.Aim;
@@ -241,22 +239,23 @@ export class Sniper {
     }
     this.doubleShot = false;
     this.state = State.Reload;
-    this.timer = this.def.mad ? MAD_RELOAD_MIN + Math.random() * (MAD_RELOAD_MAX - MAD_RELOAD_MIN) : RELOAD_TIME;
-    boltAction(this.scene, this.def.mad ? 0.25 : this.timer * 0.35); // you hear him reload: your window
+    this.timer = this.def.mad ? MathUtil.RandomRange(MAD_RELOAD_MIN, MAD_RELOAD_MAX) : RELOAD_TIME;
+    BoltAction(this.engine, this.def.mad ? 0.25 : this.timer * 0.35); // you hear him reload: your window
   }
 
   /** Idle laser: glide to a random point of a weighted zone, rest, pick another. */
-  private wander(dt: number): void {
-    if (this.track(dt, this.goalX, this.goalY, SWEEP_SPEED)) {
+  private Wander(dt: number): void {
+    if (this.Track(dt, this.goal, SWEEP_SPEED)) {
       this.timer -= dt;
       if (this.timer <= 0) {
-        this.pickGoal();
-        this.timer = DWELL_MIN + Math.random() * (DWELL_MAX - DWELL_MIN);
+        this.PickGoal();
+        this.timer = MathUtil.RandomRange(DWELL_MIN, DWELL_MAX);
       }
     }
   }
 
-  private pickGoal(): void {
+  /** A random point in one of the zones; a zone with twice the weight is picked twice as often. */
+  private PickGoal(): void {
     const zones = this.def.zones;
     let total = 0;
     for (let i = 0; i < zones.length; i++) total += zones[i].weight;
@@ -269,79 +268,75 @@ export class Sniper {
         break;
       }
     }
-    this.goalX = (z.x0 + Math.random() * (z.x1 - z.x0)) * TILE;
-    this.goalY = (z.y0 + Math.random() * (z.y1 - z.y0)) * TILE;
+    this.goal.Set(MathUtil.RandomRange(z.x0, z.x1) * TILE, MathUtil.RandomRange(z.y0, z.y1) * TILE);
   }
 
   // ---------------------------------------------------------------- gunner
 
-  private gunner(dt: number): void {
+  private Gunner(dt: number): void {
     const zone = this.def.zones[0];
     const p = this.player;
     if (this.state === State.Firing) {
       const t = this.target;
       // A zombie can stumble out of his ground; you can't: once he is on you, you are pinned until you fall.
-      const still = t ? t.alive && this.inZone(t.body.center.x, t.body.center.y) && this.exposed(t.body.center.x, t.body.center.y)
-        : !p.dead && (!this.def.mounted || this.exposed(p.body.center.x, this.headY())); // the helicopter's: smoke breaks his aim
+      const still = t ? t.alive && this.InZone(t.body.Center()) && this.Exposed(t.body.Center())
+        : !p.dead && (!this.def.mounted || this.Exposed(this.AimPoint())); // the helicopter's: smoke breaks his aim
       if (!still && !t && !p.dead) p.pinned = false;
       if (!still) {
         this.state = State.Idle;
         this.target = null;
         return;
       }
-      const tx = t ? t.body.center.x : p.body.center.x;
-      const ty = t ? t.body.center.y : this.headY();
-      this.track(dt, tx, ty, 40);
+      const aim = t ? t.body.Center() : this.AimPoint();
+      this.Track(dt, aim, 40);
       this.timer += dt;
       this.burst -= dt;
       if (this.burst <= 0) {
         this.burst = GUNNER_BURST;
-        this.shotEffects(tx + (Math.random() - 0.5) * 20, ty + (Math.random() - 0.5) * 30, 0.003, 70);
-        gunBurst(this.scene);
+        this.ShotEffects(new Vec2(aim.x + (Math.random() - 0.5) * 20, aim.y + (Math.random() - 0.5) * 30), 0.003, 0.07);
+        GunBurst(this.engine);
       }
       if (t) {
-        t.suppress(); // pinned down: it can't move, hear or grab while he shoots it
+        t.Suppress(); // pinned down: it can't move, hear or grab while he shoots it
         const took = (this.hits.get(t) ?? 0) + dt;
         this.hits.set(t, took);
         if (took >= (this.def.mounted ? MOUNTED_KILL_TIME : GUNNER_KILL_TIME)) {
-          t.shot();
+          t.Shot();
           this.state = State.Idle;
           this.target = null;
         }
       } else if (this.timer >= GUNNER_PLAYER_TIME) {
         p.pinned = false;
-        p.kill();
+        p.Kill();
         this.state = State.Idle;
       }
       return;
     }
 
     // Sweep back and forth across the watched ground.
-    const y = (zone.y0 + zone.y1) * 0.5 * TILE;
-    const goal = (this.sweepDir < 0 ? zone.x0 : zone.x1) * TILE;
-    if (this.track(dt, goal, y, GUNNER_SWEEP)) this.sweepDir = -this.sweepDir;
+    const sweepTo = new Vec2((this.sweepDir < 0 ? zone.x0 : zone.x1) * TILE, (zone.y0 + zone.y1) * 0.5 * TILE);
+    if (this.Track(dt, sweepTo, GUNNER_SWEEP)) this.sweepDir = -this.sweepDir;
 
     // Anything exposed in his ground: infected first (they are what he sees moving), then you.
     for (let i = 0; i < this.zombies.length; i++) {
       const z = this.zombies[i];
       if (!z.alive) continue;
-      const cx = z.body.center.x;
-      const cy = z.body.center.y;
-      if (this.inZone(cx, cy) && this.exposed(cx, cy)) {
-        this.startFiring(z);
+      const c = z.body.Center();
+      if (this.InZone(c) && this.Exposed(c)) {
+        this.StartFiring(z);
         return;
       }
     }
     // you: only out of hiding (crouched behind cover he can't tell you from the crates, even from above)
-    const seen = !p.dead && !p.invisible && !p.hidden && this.inZone(p.body.center.x, p.body.center.y) && this.exposed(p.body.center.x, this.headY());
+    const seen = !p.dead && !p.invisible && !p.hidden && this.InZone(p.body.Center()) && this.Exposed(this.AimPoint());
     this.spotted = seen ? this.spotted + dt : 0;
     if (seen && (!this.def.mounted || this.spotted >= MOUNTED_SPOT_TIME)) {
       this.spotted = 0;
-      this.startFiring(null);
+      this.StartFiring(null);
     }
   }
 
-  private startFiring(target: Zombie | null): void {
+  private StartFiring(target: Zombie | null): void {
     if (!target) this.player.pinned = true; // caught in the open: frozen under the fire
     this.state = State.Firing;
     this.target = target;
@@ -349,9 +344,15 @@ export class Sniper {
     this.burst = 0;
   }
 
-  private inZone(x: number, y: number): boolean {
+  /** The watched ground in px. */
+  private ZoneRect(): Rect {
     const z = this.def.zones[0];
-    return x > z.x0 * TILE && x < z.x1 * TILE && y > z.y0 * TILE && y < z.y1 * TILE;
+    return new Rect(z.x0 * TILE, z.y0 * TILE, (z.x1 - z.x0) * TILE, (z.y1 - z.y0) * TILE);
+  }
+
+  private InZone(p: Vec2): boolean {
+    const r = this.ZoneRect();
+    return p.x > r.left && p.x < r.right && p.y > r.top && p.y < r.bottom;
   }
 
   // ---------------------------------------------------------------- shared
@@ -360,16 +361,16 @@ export class Sniper {
    * Soldiers aim at your head. A big crate (~1.6 tiles) hides you only crouched (1.15 tall); standing
    * (1.8) your head shows over it.
    */
-  private headY(): number {
-    return this.player.body.top + HEAD_INSET * TILE;
+  private AimPoint(): Vec2 {
+    return new Vec2(this.player.body.centerX, this.player.body.top + HEAD_INSET * TILE);
   }
 
   /** The player is somewhere he can't see: right under his nest, he can't lean out that far. */
-  private inBlindSpot(): boolean {
+  private InBlindSpot(): boolean {
     const spots = this.def.blind;
     if (!spots) return false;
-    const x = this.player.body.center.x / TILE;
-    const y = this.player.body.center.y / TILE;
+    const x = this.player.body.centerX / TILE;
+    const y = this.player.body.centerY / TILE;
     for (let i = 0; i < spots.length; i++) {
       const b = spots[i];
       if (x > b[0] && x < b[2] && y > b[1] && y < b[3]) return true;
@@ -377,49 +378,37 @@ export class Sniper {
     return false;
   }
 
-  private playerInArea(): boolean {
+  private PlayerInArea(): boolean {
     const x = this.player.feetX;
     return x > this.def.area[0] * TILE && x < this.def.area[1] * TILE;
   }
 
-  private exposed(x: number, y: number): boolean {
-    return !this.ray(this.muzzleX, this.muzzleY, x, y).blocked;
+  private Exposed(p: Vec2): boolean {
+    return !this.Ray(this.muzzle, p).blocked;
   }
 
-  /** Move the laser toward (x, y) at `speed` tiles/s. True when it got there. */
-  private track(dt: number, x: number, y: number, speed: number): boolean {
-    const dx = x - this.laserX;
-    const dy = y - this.laserY;
-    const d = Math.hypot(dx, dy);
-    const step = speed * TILE * dt;
-    if (d <= step) {
-      this.laserX = x;
-      this.laserY = y;
-      return true;
-    }
-    this.laserX += (dx / d) * step;
-    this.laserY += (dy / d) * step;
-    return false;
+  /** Move the laser toward `target` at `speed` tiles/s. True when it got there. */
+  private Track(dt: number, target: Vec2, speed: number): boolean {
+    this.laser.Copy(Vec2.MoveTowards(this.laser, target, speed * TILE * dt));
+    return this.laser.DistanceTo(target) === 0;
   }
 
   /**
-   * March from (x0, y0) toward (x1, y1): the first solid tile or cover crate in the way.
+   * March from `from` toward `to` in RAY_STEP px steps: the first solid tile or cover in the way.
    * blocked = something stopped it before the end point.
    */
-  private ray(x0: number, y0: number, x1: number, y1: number): { x: number; y: number; blocked: boolean } {
-    const len = Math.hypot(x1 - x0, y1 - y0);
+  private Ray(from: Vec2, to: Vec2): RayResult {
+    const len = from.DistanceTo(to);
     const n = Math.max(1, Math.ceil(len / RAY_STEP));
     for (let i = 1; i <= n; i++) {
-      const t = i / n;
-      const x = x0 + (x1 - x0) * t;
-      const y = y0 + (y1 - y0) * t;
-      if (this.solidAt(x, y) || this.inCover(x, y)) return { x: x, y: y, blocked: i < n };
+      const p = Vec2.Lerp(from, to, i / n);
+      if (this.solidAt(p.x, p.y) || this.InCover(p)) return { point: p, blocked: i < n };
     }
-    return { x: x1, y: y1, blocked: false };
+    return { point: to.Clone(), blocked: false };
   }
 
   /** The cover rectangle a crouched player at (x, feetY) is hiding behind, if any. */
-  private coverOver(x: number, feetY: number): Phaser.Geom.Rectangle | null {
+  private CoverOver(x: number, feetY: number): Rect | null {
     const halfW = this.player.body.width * 0.5;
     for (let i = 0; i < this.covers.length; i++) {
       const c = this.covers[i];
@@ -428,47 +417,58 @@ export class Sniper {
     return null;
   }
 
-  private inCover(x: number, y: number): boolean {
-    for (let i = 0; i < this.covers.length; i++) if (this.covers[i].contains(x, y)) return true;
+  private InCover(p: Vec2): boolean {
+    for (let i = 0; i < this.covers.length; i++) if (this.covers[i].ContainsPoint(p)) return true;
     return false;
   }
 
   /** Where the laser beam stops: it continues past the aim point until something solid takes it. */
-  private laserEnd(): { x: number; y: number } {
-    const dx = this.laserX - this.muzzleX;
-    const dy = this.laserY - this.muzzleY;
-    const d = Math.hypot(dx, dy) || 1;
-    const far = 80 * TILE;
-    return this.ray(this.muzzleX, this.muzzleY, this.muzzleX + (dx / d) * far, this.muzzleY + (dy / d) * far);
+  private LaserEnd(): Vec2 {
+    const dir = this.laser.Sub(this.muzzle).Normalized();
+    if (dir.LengthSq() === 0) return this.laser.Clone();
+    return this.Ray(this.muzzle, this.muzzle.Add(dir.Scale(80 * TILE))).point;
   }
 
-  private shotEffects(x: number, y: number, shake: number, shakeMs: number): void {
+  private ShotEffects(at: Vec2, shake: number, shakeSeconds: number): void {
     this.flash = FLASH_TIME;
-    this.impactX = x;
-    this.impactY = y;
-    this.scene.cameras.main.shake(shakeMs, shake);
+    this.impact.Copy(at);
+    this.engine.camera.Shake(shakeSeconds, shake);
   }
 
   /** Visuals, once per rendered frame. */
-  update(timeMs: number): void {
+  Update(timeMs: number): void {
     const g = this.gfx;
-    g.clear();
+    g.Clear();
+    this.DrawDebug();
     if (!this.active && this.flash <= 0) return;
+    const m = this.muzzle;
     if (this.flash > 0) { // muzzle and impact flashes
-      g.fillStyle(0xfff2c0, 0.95).fillCircle(this.muzzleX, this.muzzleY, 16);
-      g.fillStyle(0xffffff, 0.9).fillCircle(this.impactX, this.impactY, 12);
-      g.fillStyle(0xffd060, 0.45).fillCircle(this.impactX, this.impactY, 28);
+      g.FillStyle(0xfff2c0, 0.95).FillCircle(m.x, m.y, 16);
+      g.FillStyle(0xffffff, 0.9).FillCircle(this.impact.x, this.impact.y, 12);
+      g.FillStyle(0xffd060, 0.45).FillCircle(this.impact.x, this.impact.y, 28);
     }
     const reloading = this.state === State.Reload;
     const hot = this.state === State.Aim || this.state === State.Firing;
     // Wandering: the beam runs on until something solid takes it. Locked on: it stops on the target
     // (the dot sits on you), or on the cover in front of you.
-    const end = hot || reloading ? this.ray(this.muzzleX, this.muzzleY, this.laserX, this.laserY) : this.laserEnd();
+    const end = hot || reloading ? this.Ray(m, this.laser).point : this.LaserEnd();
     const pulse = reloading ? 0.35 : hot ? 0.75 + Math.sin(timeMs / 45) * 0.25 : 1; // reloading: dim, still on you
-    g.lineStyle(hot ? 10 : 7, LASER_COLOUR, 0.12 * pulse).lineBetween(this.muzzleX, this.muzzleY, end.x, end.y);
-    g.lineStyle(hot ? 4 : 3, LASER_COLOUR, 0.35 * pulse).lineBetween(this.muzzleX, this.muzzleY, end.x, end.y);
-    g.lineStyle(hot ? 2 : 1.5, 0xff7080, 0.95).lineBetween(this.muzzleX, this.muzzleY, end.x, end.y);
-    g.fillStyle(LASER_COLOUR, 0.35).fillCircle(end.x, end.y, hot ? 12 : 9);
-    g.fillStyle(0xffb0b8, 1).fillCircle(end.x, end.y, hot ? 4 : 3);
+    g.LineStyle(hot ? 10 : 7, LASER_COLOUR, 0.12 * pulse).Line(m.x, m.y, end.x, end.y);
+    g.LineStyle(hot ? 4 : 3, LASER_COLOUR, 0.35 * pulse).Line(m.x, m.y, end.x, end.y);
+    g.LineStyle(hot ? 2 : 1.5, 0xff7080, 0.95).Line(m.x, m.y, end.x, end.y);
+    g.FillStyle(LASER_COLOUR, 0.35).FillCircle(end.x, end.y, hot ? 12 : 9);
+    g.FillStyle(0xffb0b8, 1).FillCircle(end.x, end.y, hot ? 4 : 3);
+  }
+
+  /** With "show hitboxes" on: the rifle's area / the gunner's ground, and his line of fire to the player. */
+  private DrawDebug(): void {
+    if (!this.engine.physics.drawBodies) return;
+    const d = this.engine.debug;
+    if (this.def.kind === SniperKind.Gunner) d.Box(this.ZoneRect(), 0xff9a40, false, 0.8);
+    else d.Box(new Rect(this.def.area[0] * TILE, 0, (this.def.area[1] - this.def.area[0]) * TILE, 40 * TILE), 0xff5a5a, false, 0.4);
+    if (!this.active || this.player.dead) return;
+    const aim = this.AimPoint();
+    const shot = this.Ray(this.muzzle, aim);
+    d.Ray(this.muzzle, aim.Sub(this.muzzle), this.muzzle.DistanceTo(shot.point), shot.blocked ? 0xffaa33 : 0xff3030);
   }
 }

@@ -1,6 +1,6 @@
 """
 Builds MECHANIC 2 MEDIUM's ASCII map (snipers: breaking cover, the mad sniper, smoke), printed as a
-TypeScript array to paste into src/game/Levels.ts (M2_MEDIUM_MAP).
+TypeScript array to paste into src/game/levels/Levels.ts (M2_MEDIUM_MAP).
 
   area 1, the mad sniper (x 12..68): his reload is random and sometimes he fires twice: listen for the
      bolt. Wooden crates break after 2 shots; 2 concrete blocks never break.

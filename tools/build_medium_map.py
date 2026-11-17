@@ -1,6 +1,6 @@
 """
 Builds the MEDIUM level's ASCII map (Mechanic 1: noise & distraction), printed as a TypeScript array
-to paste into src/game/Levels.ts (MEDIUM_MAP).
+to paste into src/game/levels/Levels.ts (MEDIUM_MAP).
 
 Story: a horde feeds on corpses in a sunken courtyard, between you and the exit. A wrecked car in the
 hub leaks gasoline: a Molotov would burn them all, but the rag is in the trunk, chained with three
