@@ -16,7 +16,7 @@ import { Player } from './Player';
 import { SmokeQuest } from './Smoke';
 import { Sniper } from './Sniper';
 import { Throwables } from './Throwing';
-import { forgetUpgrades, Part, Scavenge, Upgrade, upgradeBuilt } from './Upgrades';
+import { Part, Scavenge, SKILL_HINTS, Upgrade } from './Upgrades';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 
 // ---------------------------------------------------------------- the current level
@@ -46,6 +46,9 @@ const LISTEN_UNLOCK_KEY = 'upgrade:listen'; // localStorage: Listen Mode earned 
 const SUMMON_MIN_DISTANCE = 6; // tiles: when nothing off-screen is on your level, they appear at least this far
 const STOMP_NOISE = 4; // tiles
 const SCAVENGE_PATROL_RANGE = 3; // tiles: a patrolling Clicker in Mechanic 3 paces this far either side of its spot
+const WATER_COLOUR = 0x2f6f8f;
+const WATER_ALPHA = 0.55;
+const WATER_SURFACE = 0x9fd6e8;
 const HUD_UNSELECTED_ALPHA = 0.35; // HUD: the throwable the next throw won't use
 const CHECKPOINT_OFF = 0x8a8a7a;
 const CHECKPOINT_ON = 0xffa640;
@@ -93,6 +96,11 @@ function isSolid(x: number, y: number): boolean {
 }
 
 /** Stone only: what the tileset draws and what stops a sniper's line of fire (scaffolding doesn't). */
+/** Map '~': water (Mechanic 3 Medium's sea). Not solid: you fall in, and drown unless you took the pills. */
+function isWater(x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H && MAP[y][x] === '~';
+}
+
 function isStone(x: number, y: number): boolean {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return true;
   return MAP[y][x] === '#';
@@ -155,6 +163,8 @@ export class LevelScene extends Phaser.Scene {
   private snipers: Sniper[] = [];
   private smokeQuest: SmokeQuest | null = null;
   private scavenge: Scavenge | null = null; // Mechanic 3: parts + workbench
+  private breathesUnderwater = false; // Mechanic 3: breath pills (without them, water drowns you at once)
+  private skillsText: Phaser.GameObjects.Text | null = null; // HUD: the upgrades you have, and their keys
   private heli: Helicopter | null = null;
   private crates: BreakableCrate[] = []; // M2 Medium: wooden crates that break under fire
   private hudSmoke: Phaser.GameObjects.Image | null = null;
@@ -218,6 +228,8 @@ export class LevelScene extends Phaser.Scene {
     this.snipers = [];
     this.smokeQuest = null;
     this.scavenge = null;
+    this.breathesUnderwater = false;
+    this.skillsText = null;
     this.heli = null;
     this.crates = [];
     this.hudSmoke = null;
@@ -299,6 +311,7 @@ export class LevelScene extends Phaser.Scene {
       }).setOrigin(0.5).setDepth(41);
     }
     this.createHud();
+    this.applyUpgrades(); // again, now that the skills line exists
     if (this.dialogue && LEVEL.intro.length > 0 && !this.progress.introSeen) { // the level's opening thoughts
       this.progress.introSeen = true;
       const dialogue = this.dialogue;
@@ -407,6 +420,8 @@ export class LevelScene extends Phaser.Scene {
     if (!this.player.dead) {
       this.updateCheckpoints();
       this.stompsAndContacts();
+      const b = this.player.body; // in the water up to the chest, without the pills: he drowns at once
+      if (!this.breathesUnderwater && isWater(Math.floor(b.center.x / TILE), Math.floor(b.center.y / TILE))) this.player.kill();
     }
     if (this.player.dead && !this.restarting && !this.deathHandled) { // caught: by contact or by a bad punch
       this.deathHandled = true;
@@ -567,15 +582,20 @@ export class LevelScene extends Phaser.Scene {
       const extra = this.scavenge ? '  EVERY UPGRADE' : '';
       if (this.cheatText) this.cheatText.setText(this.cheating ? 'CHEATS: ' + unlimited + '  INVISIBLE  DOORS OPEN' + extra : '');
     }
-    if (this.scavenge && this.controls.pressed(Action.Num2)) { // dev: forget built upgrades, replay from scratch
-      forgetUpgrades();
-      this.progress = new LevelProgress();
-      this.checkpoint = -1;
-      this.bottlesAtCheckpoint = 0;
-      this.restartLevel();
-    }
     if (this.cheating && this.throwables.count < 9) this.throwables.count = 9;
     if (this.cheating && this.smokeQuest && this.throwables.smokes < 9) this.throwables.smokes = 9; // smoke too
+  }
+
+  /** Water: a translucent blue in front of the player (he is IN it), a light line on its surface. */
+  private drawWater(): void {
+    const g = this.add.graphics().setDepth(13);
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        if (!isWater(x, y)) continue;
+        g.fillStyle(WATER_COLOUR, WATER_ALPHA).fillRect(x * TILE, y * TILE, TILE, TILE);
+        if (!isWater(x, y - 1)) g.fillStyle(WATER_SURFACE, 0.8).fillRect(x * TILE, y * TILE, TILE, 6);
+      }
+    }
   }
 
   /** Mechanic 3: what the player can do here: upgrades built (saved), given by the level, or lent by the cheat. */
@@ -584,11 +604,16 @@ export class LevelScene extends Phaser.Scene {
     const m3 = this.scavenge !== null;
     p.canDoubleJump = m3 && this.hasUpgrade(Upgrade.DoubleJump);
     p.canDash = m3 && this.hasUpgrade(Upgrade.Dash);
-    p.silentSoles = m3 && this.hasUpgrade(Upgrade.SilentSoles);
+    this.breathesUnderwater = m3 && this.hasUpgrade(Upgrade.Pills);
+    if (this.skillsText) { // what you can do now, and the key
+      const lines: string[] = [];
+      for (let u = 0; u < Upgrade.Count; u++) if (m3 && this.hasUpgrade(u)) lines.push(SKILL_HINTS[u]);
+      this.skillsText.setText(lines.join('\n'));
+    }
   }
 
   private hasUpgrade(u: Upgrade): boolean {
-    return this.cheating || upgradeBuilt(u) || LEVEL.grants.includes(u);
+    return this.cheating || this.progress.built[u] || LEVEL.grants.includes(u);
   }
 
   /** Back to the level select (Esc, or after finishing the level). */
@@ -660,6 +685,11 @@ export class LevelScene extends Phaser.Scene {
         fontFamily: 'Georgia, serif', fontSize: '20px', fontStyle: 'bold', color: '#ff9a40', stroke: '#000000', strokeThickness: 4,
       }).setScrollFactor(0).setDepth(50);
     }
+    if (this.scavenge) {
+      this.skillsText = this.add.text(24, 172, '', {
+        fontFamily: 'Georgia, serif', fontSize: '22px', fontStyle: 'bold', color: '#ffd24a', stroke: '#000000', strokeThickness: 4, lineSpacing: 4,
+      }).setScrollFactor(0).setDepth(50);
+    }
     if (this.smokeQuest) {
       this.hudSmoke = this.add.image(48, 168, 'smoke_grenade').setScale(ART_SCALE * 2.2).setScrollFactor(0).setDepth(50).setVisible(false);
       this.hudSmokeCount = this.add.text(80, 168, '', {
@@ -674,7 +704,7 @@ export class LevelScene extends Phaser.Scene {
       + (this.player.canListen ? '   Listen Q (hold)' : '') + (LEVEL.heli ? '   Bottle / smoke Tab' : '')
       + '   Checkpoint R   Levels Esc'
       + (LEVEL.cheats ? '\nCheats   1 (toggle): unlimited bottles' + (this.smokeQuest ? ' / smoke' : '') + ' + invisible + every door open'
-        + (this.scavenge ? ' + every upgrade      2: forget built upgrades (restart from scratch)' : '') : ''), {
+        + (this.scavenge ? ' + every upgrade' : '') : ''), {
         fontFamily: 'Georgia, serif', fontSize: '22px', color: '#f0e6c8', stroke: '#000000', strokeThickness: 4,
       }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
   }
@@ -705,6 +735,7 @@ export class LevelScene extends Phaser.Scene {
     }
     ground.setScale(ART_SCALE).setDepth(0);
     grass.setScale(ART_SCALE).setDepth(11); // grass in front of the feet
+    this.drawWater();
 
     // Solid bodies: each row's runs of solid tiles, and a run continues down while the rows below have
     // the exact same run. A straight wall is then ONE body: jumping while pressed against it can't
@@ -891,8 +922,11 @@ export class LevelScene extends Phaser.Scene {
           case 'I':
             if (this.scavenge) this.scavenge.addPart(Part.Wire, feetX, feetY);
             break;
-          case 'M':
-            if (this.scavenge) this.scavenge.addPart(Part.Rubber, feetX, feetY);
+          case 'h':
+            if (this.scavenge) this.scavenge.addPart(Part.Herb, feetX, feetY);
+            break;
+          case 'g':
+            if (this.scavenge) this.scavenge.addPart(Part.Gas, feetX, feetY);
             break;
           case 'A':
             this.add.image(feetX, feetY + 2, 'tent').setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(1);

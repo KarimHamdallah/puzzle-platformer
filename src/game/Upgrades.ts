@@ -6,65 +6,66 @@ import type { Player } from './Player';
 
 /**
  * Mechanic 3: scavenge and upgrade.
- *  - Parts lie around the level (map: 'O' spring, 'U' strap, 'I' steel wire, 'M' tyre rubber).
+ *  - Parts lie around the level (map: 'O' spring, 'U' strap, 'I' steel wire, 'h' herbs, 'g' gas).
  *    Walking over one picks it up. Picked-up parts survive a death (LevelProgress).
  *  - At the workbench ('T'), Up opens it (Up again closes it): the upgrades it can build, the parts
  *    each one needs, the parts you have. Left / Right choose, Space builds: the parts are used up.
  *    The world is paused while the bench is open.
- *  - Medium's bench offers two upgrades that both need the level's ONE strap: you build one of them,
- *    and it decides your route.
- *  - A built upgrade is saved (localStorage): it stays built in every Mechanic 3 level.
+ *  - Medium's bench offers two upgrades that both need the level's ONE gas canister: you build one
+ *    of them, and it decides your route across the sea.
+ *  - A built upgrade lasts for this visit of the level (LevelProgress.built, kept over a death).
+ *    Upgrades from an earlier level are given by LevelData.grants, not saved.
  */
 
 export enum Part {
   Spring,
   Strap,
   Wire,
-  Rubber,
+  Herb,
+  Gas,
   Count, // number of part kinds, keep last
 }
 
 export enum Upgrade {
   DoubleJump,
   Dash,
-  SilentSoles,
+  Pills,
   Count, // number of upgrades, keep last
 }
 
 interface Recipe {
   name: string;
-  what: string; // what it lets you do
+  what: string; // what it lets you do (and the key)
   icon: string; // texture
   needs: number[]; // parts needed, indexed by Part
-  storageKey: string; // localStorage: '1' once built
 }
 
-const PART_NAMES = ['Spring', 'Leather strap', 'Steel wire', 'Tyre rubber']; // indexed by Part
-const PART_TEXTURES = ['spring', 'strap', 'wire', 'rubber'];
+const PART_NAMES = ['Spring', 'Leather strap', 'Steel wire', 'Medicinal herbs', 'Gas canister']; // indexed by Part
+const PART_TEXTURES = ['spring', 'strap', 'wire', 'herb', 'gas'];
 
 const RECIPES: Recipe[] = [ // indexed by Upgrade
   {
     name: 'SPRING BOOTS',
-    what: 'Double jump: press Jump again in the air.',
+    what: 'Double jump: press Space again in the air.',
     icon: 'spring_boots',
-    needs: [2, 1, 0, 0],
-    storageKey: 'upgrade:doubleJump',
+    needs: [2, 1, 0, 0, 0],
   },
   {
     name: 'BRACE BOOTS',
-    what: 'Dash: press X in the air.',
+    what: 'Dash: press X in the air. Jump island to island across the sea.',
     icon: 'brace_boots',
-    needs: [0, 1, 2, 0],
-    storageKey: 'upgrade:dash',
+    needs: [0, 0, 2, 0, 1],
   },
   {
-    name: 'RUBBER SOLES',
-    what: 'Walking and landings make no noise. Sprinting still does.',
-    icon: 'rubber_soles',
-    needs: [0, 1, 0, 2],
-    storageKey: 'upgrade:silentSoles',
+    name: 'BREATH PILLS',
+    what: 'Breathe under water: walk across the sea floor.',
+    icon: 'pills',
+    needs: [0, 0, 0, 2, 1],
   },
 ];
+
+/** Shown on the HUD while you have it: the skill and its key. */
+export const SKILL_HINTS = ['Double jump: Space in the air', 'Dash: X in the air', 'Breathe under water']; // indexed by Upgrade
 
 const PICKUP_RADIUS = 0.7; // tiles
 const BENCH_RANGE_X = 1.6 * TILE; // how close you must stand to use the bench
@@ -73,34 +74,6 @@ const COLUMN_W = 560; // px: one upgrade's column in the bench panel
 const GOOD = '#8fd16a'; // enough of a part / built
 const MISSING = '#d98a6a';
 const GOLD = '#ffd24a';
-
-/** Built before (this or another visit)? Storage blocked: never built. */
-export function upgradeBuilt(u: Upgrade): boolean {
-  try {
-    return localStorage.getItem(RECIPES[u].storageKey) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function saveUpgrade(u: Upgrade): void {
-  try {
-    localStorage.setItem(RECIPES[u].storageKey, '1');
-  } catch {
-    // storage blocked: built for this visit only
-  }
-}
-
-/** Dev shortcut (cheat key 2): forget every built upgrade, to play the levels from scratch. */
-export function forgetUpgrades(): void {
-  for (let u = 0; u < Upgrade.Count; u++) {
-    try {
-      localStorage.removeItem(RECIPES[u].storageKey);
-    } catch {
-      // storage blocked: nothing saved
-    }
-  }
-}
 
 interface PartPickup {
   part: Part;
@@ -212,7 +185,7 @@ export class Scavenge {
     this.panel.add(scene.add.text(0, 190, keys, { ...style, fontSize: '22px', color: '#c9bfa2' }).setOrigin(0.5, 0));
   }
 
-  /** Map 'O' / 'U' / 'I' / 'M': a part lying on the floor (unless taken before a death). */
+  /** Map 'O' / 'U' / 'I' / 'h' / 'g': a part lying on the floor (unless taken before a death). */
   addPart(part: Part, feetX: number, feetY: number): void {
     const index = this.pickups.length;
     const sprite = this.scene.add.image(feetX, feetY, PART_TEXTURES[part]).setOrigin(0.5, 1).setScale(ART_SCALE).setDepth(14);
@@ -266,6 +239,10 @@ export class Scavenge {
     if (near && this.input.pressed(Action.Up) && !this.input.held(Action.Throw)) this.openBench();
   }
 
+  private built(u: Upgrade): boolean {
+    return this.progress.built[u];
+  }
+
   /** A part every one of this bench's recipes needs (Part.Count: none, or a single recipe). */
   private sharedPart(): Part {
     if (this.upgrades.length < 2) return Part.Count;
@@ -292,13 +269,13 @@ export class Scavenge {
 
   private anyReady(): boolean {
     for (let i = 0; i < this.upgrades.length; i++) {
-      if (!upgradeBuilt(this.upgrades[i]) && this.hasParts(this.upgrades[i])) return true;
+      if (!this.built(this.upgrades[i]) && this.hasParts(this.upgrades[i])) return true;
     }
     return false;
   }
 
   private allBuilt(): boolean {
-    for (let i = 0; i < this.upgrades.length; i++) if (!upgradeBuilt(this.upgrades[i])) return false;
+    for (let i = 0; i < this.upgrades.length; i++) if (!this.built(this.upgrades[i])) return false;
     return true;
   }
 
@@ -351,19 +328,19 @@ export class Scavenge {
         const have = Math.min(this.progress.parts[p], recipe.needs[p]);
         col.partLines[l].setText(PART_NAMES[p] + '   ' + have + ' / ' + recipe.needs[p]).setColor(have >= recipe.needs[p] ? GOOD : MISSING);
       }
-      if (upgradeBuilt(col.upgrade)) col.status.setText('Built.').setColor(GOOD);
+      if (this.built(col.upgrade)) col.status.setText('Built.').setColor(GOOD);
       else if (this.hasParts(col.upgrade)) col.status.setText('Ready: Space builds it').setColor(GOLD);
       else col.status.setText('Missing parts').setColor(MISSING);
     }
   }
 
   private build(u: Upgrade): void {
-    if (upgradeBuilt(u) || !this.hasParts(u)) return;
+    if (this.built(u) || !this.hasParts(u)) return;
     const needs = RECIPES[u].needs;
     for (let p = 0; p < Part.Count; p++) this.progress.parts[p] -= needs[p]; // the parts go into it
-    saveUpgrade(u);
+    this.progress.built[u] = true;
     this.closeBench();
     this.onBuilt(u);
-    this.banner('NEW SKILL: ' + RECIPES[u].name, 3000);
+    this.banner('NEW SKILL: ' + RECIPES[u].name + '\n' + SKILL_HINTS[u], 3600);
   }
 }

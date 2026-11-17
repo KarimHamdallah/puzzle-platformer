@@ -125,7 +125,6 @@ export class Player {
   canDash = false; // Mechanic 3: X in the air dashes (the scene sets it)
   private dashUsed = false; // one dash per time in the air
   private dashTimer = 0; // s left in the current dash
-  silentSoles = false; // Mechanic 3: walking and landing make no noise (sprinting still does)
   pinned = false; // a machine gun is on him: frozen in place, flinching, until it kills him
   listenExhausted = false; // ran dry: locked until fully recharged
   stepCount = 0; // audible footsteps so far (the HUD noise meter pulses on each one)
@@ -515,9 +514,7 @@ export class Player {
     if (this.stepDistance < T.strideLength * TILE) return;
     this.stepDistance = 0;
     if (this.crouched) return; // sneaking is silent
-    const sprinting = speed > T.walkSpeed * TILE * 1.1;
-    if (this.silentSoles && !sprinting) return; // rubber soles: walking is silent too
-    const radius = sprinting ? T.sprintNoise : T.walkNoise;
+    const radius = speed > T.walkSpeed * TILE * 1.1 ? T.sprintNoise : T.walkNoise;
     this.noise.emit(this.feetX, this.feetY, radius, NoiseKind.Footstep);
     this.stepCount++;
   }
@@ -527,7 +524,7 @@ export class Player {
     if (!this.grounded || this.crouched || this.dead) return 0;
     const speed = Math.abs(this.body.velocity.x);
     if (speed > T.walkSpeed * TILE * 1.1) return 2;
-    return speed > 10 && !this.silentSoles ? 1 : 0;
+    return speed > 10 ? 1 : 0;
   }
 
   private behindCover(): boolean {
@@ -642,7 +639,7 @@ export class Player {
     const impact = Phaser.Math.Clamp(this.airborneVy / (T.maxFallSpeed * TILE), 0, 1);
     this.pulseScale(1 + T.squash * impact, 1 - T.squash * impact, 130);
     if (impact > 0.2) this.landTimer = LAND_ANIM_TIME; // small hops don't need the crouch pose
-    if (impact > 0.45 && !this.silentSoles) { // hard landings are loud (rubber soles: silent)
+    if (impact > 0.45) { // hard landings are loud
       this.noise.emit(this.feetX, this.feetY, T.landNoise, NoiseKind.Landing);
       this.landCount++;
     }

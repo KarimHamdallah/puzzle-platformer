@@ -882,16 +882,37 @@ def draw_wire_sprite():
     return c.image().crop((0, 1, 17, 15))
 
 
-def draw_rubber_sprite():
-    """Mechanic 3 part: a chunk cut from a tyre, 18x10 px: black rubber, tread grooves."""
+def draw_herb_sprite():
+    """Mechanic 3 part: a bundle of dried medicinal herbs tied with string, 14x16 px."""
     c = Canvas()
-    c.rect(1, 3, 16, 8, '4')
-    c.row(2, 3, 14, '4')
-    for x in (3, 7, 11, 15):
-        c.rect(x, 3, x, 5, '5')                     # tread
-    c.row(8, 1, 16, '7')
+    for (x0, y0, x1, y1) in ((7, 15, 3, 3), (7, 15, 7, 1), (7, 15, 11, 3), (7, 15, 5, 2), (7, 15, 9, 2)):
+        c.stroke((x0, y0), (x1, y1), 1, 'f')         # stems
+    for (x, y) in ((3, 3), (4, 5), (7, 1), (6, 4), (11, 3), (10, 5), (5, 2), (9, 2), (8, 4)):
+        c.put(x, y, 'n'); c.put(x + 1, y, 'n')       # leaves
+    c.row(10, 6, 8, 'M')                            # the string
     c.outline()
-    return c.image().crop((0, 0, 18, 10))
+    return c.image().crop((1, 0, 14, 17))
+
+
+def draw_gas_sprite():
+    """Mechanic 3 part: a small camping gas canister (the bench burner's fuel), 12x18 px."""
+    c = Canvas()
+    c.rect(2, 5, 9, 16, 'h'); c.rect(2, 5, 3, 16, '1')  # red can, shaded side
+    c.row(9, 2, 9, 'M'); c.row(10, 2, 9, 'M')       # label band
+    c.rect(4, 2, 7, 4, '5'); c.rect(5, 1, 6, 1, 'V')    # valve
+    c.outline()
+    return c.image().crop((0, 0, 12, 18))
+
+
+def draw_pills_sprite():
+    """Upgrade icon: a jar of breath pills, 16x20 px."""
+    c = Canvas()
+    c.rect(2, 6, 13, 18, 'q'); c.rect(2, 6, 3, 18, 'Q')  # glass jar
+    for (x, y) in ((5, 14), (8, 15), (10, 13), (6, 11), (9, 10), (11, 16)):
+        c.rect(x, y, x + 1, y, 'M')                 # pills
+    c.rect(1, 3, 14, 5, 'u')                        # blue lid
+    c.outline()
+    return c.image().crop((0, 2, 16, 20))
 
 
 def draw_brace_boots_sprite():
@@ -902,18 +923,6 @@ def draw_brace_boots_sprite():
     for y in (5, 9, 13):
         c.row(y, 3, 11, 'V')                        # wire wraps
     c.row(16, 4, 9, 'L'); c.put(8, 16, 'Y')         # the strap
-    c.outline()
-    return c.image().crop((1, 0, 18, 22))
-
-
-def draw_rubber_soles_sprite():
-    """Upgrade icon: a work boot on a thick tyre-rubber sole (silent steps), 18x22 px."""
-    c = Canvas()
-    c.rect(4, 2, 10, 13, 'O'); c.rect(4, 14, 15, 16, 'O')                           # boot
-    c.row(9, 4, 10, 'L'); c.put(9, 9, 'Y')          # the strap
-    c.rect(3, 17, 16, 20, '4')                      # the rubber sole
-    for x in (5, 9, 13):
-        c.put(x, 20, '5')
     c.outline()
     return c.image().crop((1, 0, 18, 22))
 
@@ -999,12 +1008,13 @@ def main():
     draw_spring_boots_sprite().save(os.path.join(out_dir, 'spring_boots.png'))
     draw_workbench_sprite().save(os.path.join(out_dir, 'workbench.png'))
     draw_wire_sprite().save(os.path.join(out_dir, 'wire.png'))
-    draw_rubber_sprite().save(os.path.join(out_dir, 'rubber.png'))
+    draw_herb_sprite().save(os.path.join(out_dir, 'herb.png'))
+    draw_gas_sprite().save(os.path.join(out_dir, 'gas.png'))
     draw_brace_boots_sprite().save(os.path.join(out_dir, 'brace_boots.png'))
-    draw_rubber_soles_sprite().save(os.path.join(out_dir, 'rubber_soles.png'))
+    draw_pills_sprite().save(os.path.join(out_dir, 'pills.png'))
     if preview_dir:
         items = [draw_workbench_sprite(), draw_spring_sprite(), draw_strap_sprite(), draw_spring_boots_sprite(),
-                 draw_wire_sprite(), draw_rubber_sprite(), draw_brace_boots_sprite(), draw_rubber_soles_sprite()]
+                 draw_wire_sprite(), draw_herb_sprite(), draw_gas_sprite(), draw_brace_boots_sprite(), draw_pills_sprite()]
         pw = sum(i.width for i in items) + 10 * len(items)
         ph = max(i.height for i in items)
         prev = Image.new('RGBA', (pw, ph), (90, 96, 110, 255))

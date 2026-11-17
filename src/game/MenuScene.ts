@@ -70,7 +70,7 @@ const SECTIONS: MenuSection[] = [
     subheading: 'Search the ruins for parts, build upgrades at the workbench, reach what you could not before.',
     levels: [
       { scene: 'Level', level: 6, label: 'EASY', title: 'Spring Boots', blurb: 'A cliff too high. Find the parts, build the boots.', thumb: THUMB_M3_EASY },
-      { scene: 'Level', level: 7, label: 'MEDIUM', title: 'Two Ways', blurb: 'One strap: dash over the bridge, or go silent under it.', thumb: '' },
+      { scene: 'Level', level: 7, label: 'MEDIUM', title: 'The Sea', blurb: 'One gas canister: dash the islands, or breathe below.', thumb: '' },
       { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Everything you built, together.', thumb: '' },
     ],
   },
