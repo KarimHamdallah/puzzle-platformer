@@ -73,7 +73,7 @@ const SECTIONS: MenuSection[] = [
     levels: [
       { scene: 'Level', level: 6, label: 'EASY', title: 'Spring Boots', blurb: 'A cliff too high. Find the parts, build the boots.', thumb: THUMB_M3_EASY },
       { scene: 'Level', level: 7, label: 'MEDIUM', title: 'The Sea', blurb: 'One gas canister: dash the islands, or breathe below.', thumb: THUMB_M3_MEDIUM },
-      { scene: '', level: 0, label: 'HARD', title: 'Coming soon', blurb: 'Everything you built, together.', thumb: '' },
+      { scene: 'Level', level: 8, label: 'HARD', title: 'Everything', blurb: 'Pills through the flooded tunnel, then dash the sea.', thumb: '' },
     ],
   },
 ];

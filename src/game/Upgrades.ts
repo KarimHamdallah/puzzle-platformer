@@ -40,8 +40,6 @@ interface Recipe {
   needs: number[]; // parts needed, indexed by Part
 }
 
-export const PILL_TIME = 16; // s of breath from one pill: the sea floor takes ~11 s sprinting, ~14 s walking
-
 const PART_NAMES = ['Spring', 'Leather strap', 'Steel wire', 'Medicinal herbs', 'Gas canister']; // indexed by Part
 const PART_TEXTURES = ['spring', 'strap', 'wire', 'herb', 'gas'];
 
@@ -60,7 +58,7 @@ const RECIPES: Recipe[] = [ // indexed by Upgrade
   },
   {
     name: 'BREATH PILLS',
-    what: 'Breathe under water for ' + PILL_TIME + ' seconds from the moment you take them. Run the sea floor.',
+    what: 'Breathe under water while the clock on the HUD lasts (it starts when you take them). Run the sea floor.',
     icon: 'pills',
     needs: [0, 0, 0, 2, 1],
   },
@@ -118,6 +116,7 @@ export class Scavenge {
   private readonly panel: Phaser.GameObjects.Container;
   private readonly columns: Column[] = [];
   private choice = 0; // index into columns
+  private readonly warning: Phaser.GameObjects.Text; // 'you can build only one' (when the level is that short of a part)
 
   constructor(scene: Phaser.Scene, input: InputActions, progress: LevelProgress, upgrades: Upgrade[],
     banner: (text: string, ms: number) => void) {
@@ -153,12 +152,8 @@ export class Scavenge {
     this.panel.add(bg);
     const style = { fontFamily: 'Georgia, serif', color: '#f0e6c8' };
     this.panel.add(scene.add.text(0, -225, 'WORKBENCH', { ...style, fontSize: '24px', color: '#c9bfa2' }).setOrigin(0.5, 0));
-    const shared = this.sharedPart();
-    if (shared !== Part.Count) { // a part every recipe here needs, one of each in the level: you build ONE of them
-      this.panel.add(scene.add.text(0, 238, 'They all need the ' + PART_NAMES[shared].toLowerCase() + ': you can build only one.', {
-        ...style, fontSize: '22px', fontStyle: 'italic', color: MISSING,
-      }).setOrigin(0.5, 1));
-    }
+    this.warning = scene.add.text(0, 238, '', { ...style, fontSize: '22px', fontStyle: 'italic', color: MISSING }).setOrigin(0.5, 1);
+    this.panel.add(this.warning);
     for (let i = 0; i < n; i++) {
       const cx = (i - (n - 1) / 2) * COLUMN_W; // column centre
       const recipe = RECIPES[upgrades[i]];
@@ -263,6 +258,15 @@ export class Scavenge {
     return most;
   }
 
+  /** How many of part p this level asks you to find: enough for every recipe, but no more than it holds. */
+  private neededHere(p: Part): number {
+    let all = 0;
+    for (let i = 0; i < this.upgrades.length; i++) all += RECIPES[this.upgrades[i]].needs[p];
+    let inLevel = 0;
+    for (let k = 0; k < this.pickups.length; k++) if (this.pickups[k].part === p) inLevel++;
+    return Math.min(all, inLevel);
+  }
+
   private hasParts(u: Upgrade): boolean {
     const needs = RECIPES[u].needs;
     for (let p = 0; p < Part.Count; p++) if (this.progress.parts[p] < needs[p]) return false;
@@ -285,7 +289,7 @@ export class Scavenge {
     const done = this.allBuilt();
     for (let i = 0; i < this.hudParts.length; i++) {
       const p = this.hudParts[i];
-      const need = this.mostNeeded(p);
+      const need = this.neededHere(p);
       const have = this.progress.parts[p];
       this.hudIcons[i].setVisible(!done);
       this.hudCounts[i].setVisible(!done).setText(have + '/' + need).setColor(have >= need ? GOOD : '#f0e6c8');
@@ -316,6 +320,12 @@ export class Scavenge {
   /** Select column i (clamped) and redraw the panel. */
   private choose(i: number): void {
     this.choice = Phaser.Math.Clamp(i, 0, this.columns.length - 1);
+    // A part every recipe needs, and the level holds too few of it for all of them: you build ONE.
+    const shared = this.sharedPart();
+    let inLevel = 0;
+    for (let k = 0; k < this.pickups.length; k++) if (this.pickups[k].part === shared) inLevel++;
+    const short = shared !== Part.Count && inLevel < this.upgrades.length;
+    this.warning.setText(short ? 'They all need the ' + PART_NAMES[shared].toLowerCase() + ': you can build only one.' : '');
     for (let c = 0; c < this.columns.length; c++) {
       const col = this.columns[c];
       const recipe = RECIPES[col.upgrade];

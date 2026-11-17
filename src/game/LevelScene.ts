@@ -16,7 +16,7 @@ import { Player } from './Player';
 import { SmokeQuest } from './Smoke';
 import { Sniper } from './Sniper';
 import { Throwables } from './Throwing';
-import { Part, PILL_TIME, Scavenge, SKILL_HINTS, Upgrade } from './Upgrades';
+import { Part, Scavenge, SKILL_HINTS, Upgrade } from './Upgrades';
 import { Zombie, ZombieDebug, ZombieKind } from './Zombie';
 
 // ---------------------------------------------------------------- the current level
@@ -96,9 +96,14 @@ function isSolid(x: number, y: number): boolean {
 }
 
 /** Stone only: what the tileset draws and what stops a sniper's line of fire (scaffolding doesn't). */
-/** Map '~': water (Mechanic 3 Medium's sea). Not solid: you fall in, and drown unless you took the pills. */
+/** Map '~': water (Mechanic 3's seas). Not solid: you fall in, and drown unless you took the pills. */
 function isWater(x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H && MAP[y][x] === '~';
+}
+
+/** Map 'a': an air pocket in the water (under a rock): breathing it refills the pills' clock. */
+function isAir(x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H && MAP[y][x] === 'a';
 }
 
 function isStone(x: number, y: number): boolean {
@@ -283,10 +288,10 @@ export class LevelScene extends Phaser.Scene {
     if (LEVEL.upgrades.length > 0) { // Mechanic 3: the parts and the workbench
       this.scavenge = new Scavenge(this, this.controls, this.progress, LEVEL.upgrades, (text, ms) => this.banner(text, ms));
       this.scavenge.onBuilt = (u) => {
-        if (u === Upgrade.Pills) this.pillsLeft = PILL_TIME; // swallowed now: the clock is running
+        if (u === Upgrade.Pills) this.pillsLeft = LEVEL.pillTime; // swallowed now: the clock is running
         this.applyUpgrades();
       };
-      if (this.progress.built[Upgrade.Pills]) this.pillsLeft = PILL_TIME; // after a death: another pill
+      if (this.progress.built[Upgrade.Pills]) this.pillsLeft = LEVEL.pillTime; // after a death: another pill
     }
     this.spawnEntities();
     this.player.covers = this.covers;
@@ -432,8 +437,14 @@ export class LevelScene extends Phaser.Scene {
         if (Math.ceil(this.pillsLeft) !== shown) this.applyUpgrades(); // the HUD's seconds, and at 0 no more breath
         if (this.pillsLeft === 0) this.banner('THE PILLS WORE OFF', 1500);
       }
-      const b = this.player.body; // in the water up to the chest, without the pills: he drowns at once
-      if (!this.breathesUnderwater && isWater(Math.floor(b.center.x / TILE), Math.floor(b.center.y / TILE))) this.player.kill();
+      const b = this.player.body;
+      const cx = Math.floor(b.center.x / TILE);
+      const cy = Math.floor(b.center.y / TILE);
+      if (this.progress.built[Upgrade.Pills] && isAir(cx, cy) && this.pillsLeft < LEVEL.pillTime) { // a breath: the clock is full again
+        this.pillsLeft = LEVEL.pillTime;
+        this.applyUpgrades();
+      }
+      if (!this.breathesUnderwater && isWater(cx, cy)) this.player.kill(); // in the water up to the chest, without the pills: he drowns at once
     }
     if (this.player.dead && !this.restarting && !this.deathHandled) { // caught: by contact or by a bad punch
       this.deathHandled = true;
@@ -603,9 +614,13 @@ export class LevelScene extends Phaser.Scene {
     const g = this.add.graphics().setDepth(13);
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
+        if (isAir(x, y)) { // an air pocket: a few bubbles, so it reads as "breathe here"
+          g.fillStyle(WATER_SURFACE, 0.5).fillCircle((x + 0.3) * TILE, (y + 0.4) * TILE, 6).fillCircle((x + 0.7) * TILE, (y + 0.75) * TILE, 4);
+          continue;
+        }
         if (!isWater(x, y)) continue;
         g.fillStyle(WATER_COLOUR, WATER_ALPHA).fillRect(x * TILE, y * TILE, TILE, TILE);
-        if (!isWater(x, y - 1)) g.fillStyle(WATER_SURFACE, 0.8).fillRect(x * TILE, y * TILE, TILE, 6);
+        if (!isWater(x, y - 1) && !isAir(x, y - 1)) g.fillStyle(WATER_SURFACE, 0.8).fillRect(x * TILE, y * TILE, TILE, 6);
       }
     }
   }
