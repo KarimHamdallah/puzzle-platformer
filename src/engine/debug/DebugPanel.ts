@@ -1,7 +1,7 @@
 import GUI from 'lil-gui';
 
-/** Debug tools exist in dev builds, or in any build opened with ?debug in the URL. */
-export const DEBUG_ENABLED: boolean = import.meta.env.DEV || new URLSearchParams(window.location.search).has('debug');
+/** Debug tools are in every build (the deployed one too): reviewers can tune, see hitboxes and enemy senses. */
+export const DEBUG_ENABLED: boolean = true;
 
 /**
  * The debug panel (lil-gui), one per page. Backtick ( ` ) shows / hides it.
