@@ -17,7 +17,7 @@ import type { Throwables } from './Throwing';
  *  5. The car: the trunk opens, the rag, a Molotov (new skill). One throw into the horde burns them all
  *     (on purpose: a Molotov that lands among them always works; one that lands elsewhere goes out and
  *     comes back to you). The gate behind them opens.
- * Dev shortcuts (debug builds): 1 = next coloured key, 2 = the rag.
+ * Dev shortcut (debug builds): 2 = the next coloured key, then the rag (1 is the cheat toggle).
  */
 
 const CAR_FIRST = [
@@ -236,24 +236,24 @@ export class MolotovQuest {
     this.engine.tweens.To(f, { alpha: 0 }, 1.5, { delay: GROUND_FIRE_TIME, onDone: () => f.Destroy() });
   }
 
-  /** 1 = next coloured key, 2 = the rag (skips the trunk: the car then crafts the Molotov). */
+  /**
+   * Key 2 (key 1 is the cheat toggle): the next coloured key; once all three are held (or used), the rag
+   * (it skips the trunk: the car then crafts the Molotov).
+   */
   private DevShortcuts(): void {
     const p = this.progress;
-    const input = this.engine.input;
-    if (input.Pressed(Action.Num1)) {
-      for (let c = 0; c < KeyColor.Count; c++) {
-        if (p.keyHeld[c] || p.keysUsed) continue;
-        p.keyHeld[c] = true;
-        p.keyDropped[c] = true; // its guardians won't drop a second one
-        this.banner('DEV: ' + ['RED', 'GREEN', 'BLUE'][c] + ' KEY', 0.9);
-        break;
-      }
+    if (!this.engine.input.Pressed(Action.Num2)) return;
+    for (let c = 0; c < KeyColor.Count; c++) {
+      if (p.keyHeld[c] || p.keysUsed) continue;
+      p.keyHeld[c] = true;
+      p.keyDropped[c] = true; // its guardians won't drop a second one
+      this.banner('DEV: ' + ['RED', 'GREEN', 'BLUE'][c] + ' KEY', 0.9);
+      return;
     }
-    if (input.Pressed(Action.Num2) && !p.molotov) {
-      p.rag = true;
-      p.sawHorde = true;
-      p.carStage = Math.max(p.carStage, 2);
-      this.banner('DEV: RAG', 0.9);
-    }
+    if (p.molotov) return;
+    p.rag = true;
+    p.sawHorde = true;
+    p.carStage = Math.max(p.carStage, 2);
+    this.banner('DEV: RAG', 0.9);
   }
 }

@@ -14,8 +14,8 @@ export enum Action {
   Back, // leave the level for the level select
   Listen, // hold: Listen Mode (Hard level's upgrade)
   Swap, // smoke levels: switch the next throw between bottle and smoke grenade
-  Num1, // number-row shortcuts: the cheat toggle (Hard) / dev shortcuts (Medium, debug builds)
-  Num2,
+  Num1, // the cheat toggle (every level)
+  Num2, // dev shortcut (Mechanic 1 Medium, debug builds): next coloured key, then the rag
   Count, // number of actions, keep last
 }
 
