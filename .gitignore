@@ -23,9 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Third-party CraftPix art: licence forbids publishing the raw files (decide repo visibility first)
-public/assets/craftpix/
-
 # Level thumbnails taken from other games (reference screenshots): not ours to publish
 public/assets/thumbs/mechanic1_easy.png
 public/assets/thumbs/mechanic1_medium.png
