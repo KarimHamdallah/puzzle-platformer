@@ -7,7 +7,7 @@ Everything in the game is free to use. Nothing was purchased.
 | Asset | Source | Licence |
 |---|---|---|
 | Survivor, the father's body, dead soldier, car, molotov, rag, fire, boot icon, key, door, stash, bottle, big crate, sniper / gunner nests, tent, campfire, newspaper, scaffolding | Drawn for this project, pixel by pixel, by `tools/draw_player.py` | Ours |
-| Zombies (Zombie Man, Wild Zombie, Zombie Woman) | CraftPix.net freebie "3 Zombies" | CraftPix freebie licence: commercial use and modification allowed, no credit required, raw files may not be redistributed (kept out of git: `public/assets/craftpix/`) |
+| Zombies (Zombie Man, Wild Zombie, Zombie Woman) | CraftPix.net freebie "3 Zombies" | CraftPix freebie licence: commercial use and modification allowed, no credit required, raw files may not be redistributed (in git so Vercel can build, so the repository must stay private) |
 | Tileset (recoloured olive), boxes, stones | CraftPix.net freebie tilesets | Same CraftPix freebie licence |
 | Parallax backgrounds | CraftPix.net freebie "Postapocalypse 2" | Same CraftPix freebie licence |
 
