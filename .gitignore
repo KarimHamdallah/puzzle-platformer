@@ -23,13 +23,3 @@ dist-ssr
 *.sln
 *.sw?
 
-# Level thumbnails taken from other games (reference screenshots): not ours to publish
-public/assets/thumbs/mechanic1_easy.png
-public/assets/thumbs/mechanic1_medium.png
-public/assets/thumbs/mechanic1_hard.png
-public/assets/thumbs/mechanic2_easy.webp
-public/assets/thumbs/mechanic2_medium.png
-public/assets/thumbs/mechanic2_hard.png
-public/assets/thumbs/mechanic3_easy.jpg
-public/assets/thumbs/mechanic3_medium.jpg
-public/assets/thumbs/mechanic3_hard.png
